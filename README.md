@@ -1,2 +1,4 @@
 # vessl
-A Very Simple Sound Library
+A Very Simple Synthesis Library
+
+

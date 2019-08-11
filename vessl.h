@@ -270,7 +270,37 @@ namespace vessl
   template<typename T>
   T clamp(T x, T a, T b)
   {
-    return std::fmax(std::fmin(x, b), a);
+    return std::max<T>(std::min<T>(x, b), a);
+  }
+
+  template<typename T>
+  T sampleNearest(const T* samples, T fidx)
+  {
+	  return samples[static_cast<size_t>(std::round(fidx))];
+  }
+
+  template<typename T>
+  T sampleLinear(const T* samples, T fidx)
+  {
+	  T idx;
+	  const T frac = std::modf(fidx, &idx);
+	  const size_t x0 = static_cast<size_t>(idx);
+	  return samples[x0] + (samples[x0 + 1] - samples[x0])*frac;
+  }
+
+  template<typename T>
+  T sampleCubic(const T* samples, T fidx)
+  {
+	  static const T div6 = static_cast<T>(1. / 6.);
+	  static const T div2 = static_cast<T>(0.5);
+
+	  T idx;
+	  const T f = std::modf(fidx, &idx);
+	  const T fm1 = f - 1.;
+	  const T fm2 = f - 2.;
+	  const T fp1 = f + 1;
+	  const size_t x0 = static_cast<size_t>(idx);
+	  return -f*fm1*fm2*div6 * samples[x0 - 1] + fp1*fm1*fm2*div2 * samples[x0] - fp1*f*fm2*div2 * samples[x0 + 1] + fp1*f*fm1*div6 * samples[x0 + 2];
   }
 
   template<typename T, std::size_t N>

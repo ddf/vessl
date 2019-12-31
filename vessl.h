@@ -394,7 +394,7 @@ namespace vessl
       for (int o = 0; o < O; ++o)
       {
         // initialize
-        float v = 0;
+        T v = 0;
         // sum all inputs to this output based on matrix and volume settings
         for (int i = 0; i < I; ++i)
         {

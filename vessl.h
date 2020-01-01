@@ -285,6 +285,16 @@ namespace vessl
     };
   };
 
+  struct noiseTint
+  {
+    enum type
+    {
+      white,
+      brown,
+      pink
+    };
+  };
+
   template<typename T>
   T clamp(T x, T a, T b)
   {
@@ -457,6 +467,94 @@ namespace vessl
 #pragma endregion
 
 #pragma region unit generators
+  template<typename T>
+  class noise final : unit<T>
+  {
+  public:
+    static T next(noiseTint::type tint, T dt)
+    {
+      switch (tint)
+      {
+        case noiseTint::white:
+        {
+          return 2 * ((T)rand() / RAND_MAX) - 1;
+        }
+
+        case noiseTint::brown:
+        {
+          static const T rc = (T)1 / (M_PI * 200);
+          static const T ac = 6.2;
+          static T prev = 0;
+          T alpha = dt / (dt + rc);
+          T white = 2 * ((T)rand() / RAND_MAX) - 1;
+          prev = lerp<T>(prev, white, alpha);
+          return prev * ac;
+        }
+
+        // This is the Voss algorithm (see: http://www.firstpr.com.au/dsp/pink-noise/)
+        // Would be good to dig into the improvements on the algorithm mentioned later in the article.
+        case noiseTint::pink:
+        {
+          static const int range = 128;
+          static const int maxKey = 0x1f;
+          static int key = 0;
+          static T maxSum = 90;
+          static int whiteValues[6] = { rand() % (range / 6), rand() % (range / 6), rand() % (range / 6), rand() % (range / 6), rand() % (range / 6), rand() % (range / 6) };
+
+          int lastKey = key;
+          T sum = 0;
+          key = key == maxKey ? 0 : ++key;
+
+          int diff = lastKey ^ key;
+          for (int i = 0; i < 6; ++i)
+          {
+            if ((diff & (1 << i)) != 0)
+            {
+              whiteValues[i] = rand() % (range / 6);
+            }
+            sum += whiteValues[i];
+          }
+          maxSum = std::max<T>(sum, maxSum);
+          return 2 * (sum / maxSum) - 1;
+        }
+      }
+
+      return 0;
+    }
+
+  public:
+    noise(noiseTint::type withTint) : tint(withTint), io(this)
+    {
+      io.out[0] = nz[0] = nz[1] = next(withTint, 0);
+    }
+
+    noiseTint::type tint;
+    input& rate = io.in[0];
+    output& out = io.out[0];
+
+    array<input>& inputs() override { return io.inputs(); }
+    array<output>& outputs() override { return io.outputs(); }
+
+    void tick(T deltaTime) override
+    {
+      step += deltaTime * io.in[0];
+      T alpha = step / deltaTime;
+      if (alpha >= 1)
+      {
+        nz[0] = nz[1];
+        nz[1] = next(tint, deltaTime);
+        alpha = wrapPhase(alpha);
+        step = alpha * deltaTime;
+      }
+      io.out[0] = lerp(nz[0], nz[1], alpha);
+    }
+
+  private:
+    T step = 0;
+    T nz[2];
+    io<T, 1, 1> io;
+  };
+
   template<typename T, int I, int O>
   class mixer final : public unit<T>
   {

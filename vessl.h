@@ -81,6 +81,14 @@ namespace vessl
     virtual void tick(T deltaTime) = 0;
   };
 
+  template<typename T>
+  class waveform
+  {
+  public:    
+    /// returns the value of the waveform at phase, where phase is [0,1)
+    virtual T value(T phase) const = 0;
+  };
+
   // TODO: unpatching outputs or inputs
   template<typename T>
   class signal
@@ -328,6 +336,80 @@ namespace vessl
     }	
   }
 
+  // a fixed-sized buffer that supports safely sampling it with a fractional index in the range [0, N-1],
+  // or with a normalized "at" position in the range [0,1] where 0 will return buffer[0] and 1 will return buffer[N-1].
+  template<typename T, std::size_t N, interpolation::type I = interpolation::linear>
+  class samplebuffer final : public waveform<T>
+  {
+  public:
+    samplebuffer() : buffer({}) { }
+
+    samplebuffer(const T(&values)[N])
+    {
+      for (int i = 0; i < N; ++i)
+      {
+        buffer[i + 1] = values[i];
+      }
+
+      // configure extra values on the ends of the buffer
+      // so that sampling buffers that are periodic waveforms will work correctly
+      buffer[0]   = buffer[N];
+      buffer[N+1] = buffer[1];
+      buffer[N+2] = buffer[2];
+    }
+
+    samplebuffer(const std::function<T(T)> generator)
+    {
+      T phase = 0;
+      T step = (T)1 / N;
+      for (int i = 0; i < N; ++i)
+      {
+        buffer[i + 1] = generator(phase);
+        phase += step;
+      }
+
+      // configure extra values on the ends of the buffer
+      // so that sampling buffers that are periodic waveforms will work correctly
+      buffer[0] = buffer[N];
+      buffer[N + 1] = buffer[1];
+      buffer[N + 2] = buffer[2];
+    }
+
+    std::size_t size() const
+    {
+      return N;
+    }
+
+    T get(std::size_t i) const
+    {
+      return buffer[i+1];
+    }
+
+    void set(std::size_t i, T val)
+    {
+      buffer[i + 1] = val;
+      // also update wrap-around values
+      switch (i)
+      {
+        case 0: buffer[N+1] = buffer[1]; break;
+        case 1: buffer[N+2] = buffer[2]; break;
+        case N - 1: buffer[0] = buffer[N]; break;
+      }
+    }
+
+    T sample(T fidx) const
+    {
+      return vessl::sample(buffer, fidx+1, I);
+    }
+
+    T value(T phase) const override
+    {
+      return sample(N*phase);
+    }
+
+  private:
+    T buffer[N+3];
+  };
 
   template<typename T, std::size_t N>
   class ringbuffer

@@ -267,6 +267,16 @@ namespace vessl
     };
   };
 
+  struct interpolation
+  {
+    enum type
+    {
+      nearest,
+      linear,
+      cubic
+    };
+  };
+
   template<typename T>
   T clamp(T x, T a, T b)
   {
@@ -274,13 +284,27 @@ namespace vessl
   }
 
   template<typename T>
-  T sampleNearest(const T* samples, T fidx)
+  T wrapPhase(T phase)
   {
-	  return samples[static_cast<size_t>(std::round(fidx))];
+    const T frac = std::modf(phase, &phase);
+    return frac < 0 ? frac + 1 : frac;
   }
 
   template<typename T>
-  T sampleLinear(const T* samples, T fidx)
+  T lerp(T v1, T v2, T a)
+  {
+    return v1 + (v2 - v1)*a;
+  }
+
+  template<typename T>
+  T sample(const T* samples, T fidx, interpolation::type interp = interpolation::linear)
+  {
+    switch (interp)
+    {
+      case interpolation::nearest:
+        return samples[static_cast<size_t>(std::round(fidx))];
+
+      case interpolation::linear:
   {
 	  T idx;
 	  const T frac = std::modf(fidx, &idx);
@@ -288,8 +312,7 @@ namespace vessl
 	  return samples[x0] + (samples[x0 + 1] - samples[x0])*frac;
   }
 
-  template<typename T>
-  T sampleCubic(const T* samples, T fidx)
+      case interpolation::cubic:
   {
 	  static const T div6 = static_cast<T>(1. / 6.);
 	  static const T div2 = static_cast<T>(0.5);
@@ -302,6 +325,9 @@ namespace vessl
 	  const size_t x0 = static_cast<size_t>(idx);
 	  return -f*fm1*fm2*div6 * samples[x0 - 1] + fp1*fm1*fm2*div2 * samples[x0] - fp1*f*fm2*div2 * samples[x0 + 1] + fp1*f*fm1*div6 * samples[x0 + 2];
   }
+    }	
+  }
+
 
   template<typename T, std::size_t N>
   class ringbuffer

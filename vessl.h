@@ -291,8 +291,9 @@ namespace vessl
     enum type
     {
       white,
+      pink,
+      red,
       brown,
-      pink
     };
   };
 
@@ -481,6 +482,10 @@ namespace vessl
           return 2 * ((T)rand() / RAND_MAX) - 1;
         }
 
+        // #TODO: this contains clicks when run at audio frequency and I'm not sure why.
+        // Need to either read up on how to do this properly and write a new implementation,
+        // or find some open source code that can be used without causing license issues.
+        case noiseTint::red:
         case noiseTint::brown:
         {
           static const T rc = (T)1 / (M_PI * 200);
@@ -527,6 +532,7 @@ namespace vessl
     noise(noiseTint::type withTint) : tint(withTint), io(this)
     {
       io.out[0] = nz[0] = nz[1] = next(withTint, 0);
+      io.in[0] = 1;
     }
 
     noiseTint::type tint;

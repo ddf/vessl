@@ -26,6 +26,7 @@
 
 #include <map>
 #include <vector>
+#include <functional>
 
 namespace vessl
 {
@@ -618,11 +619,11 @@ namespace vessl
   };
 
   // lightweight unit to transform an input value to an output via a user-provided delegate
-  template<typename T>
+  template<typename T, int I = 1>
   class function : public unit<T>
   {
   public:
-    typedef T(*delegateType)(T, T);
+    using delegateType = std::function<T(T, T)>;
 
     function(delegateType d)
       : io(this)
@@ -643,8 +644,22 @@ namespace vessl
       io.out[0] = delegate(io.in[0], deltaTime);
     }
 
-  private:
-    io<T, 1, 1> io;
+  protected:
+    io<T, I, 1> io;
+  };
+
+  // multiplies 'in' by 'factor' and puts the result in 'out'
+  template<typename T>
+  class multiplier final : public function<T, 2>
+  {
+  public:
+     multiplier(T amount = 0) 
+      : function([this](T val, T dt){ return val * io.in[1]; })
+    {
+      io.in[1] = amount;
+    }
+
+    unit::input& factor = io.in[1];
   };
 
   template<typename T>

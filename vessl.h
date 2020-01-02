@@ -28,6 +28,9 @@
 #include <vector>
 #include <functional>
 
+#define _USE_MATH_DEFINES
+#include <math.h>
+
 namespace vessl
 {
 #pragma region interface
@@ -468,6 +471,14 @@ namespace vessl
   };
 #pragma endregion
 
+#pragma region waveforms
+  template<typename T>
+  struct waves
+  {
+    inline static const samplebuffer<T, 1024> sine = samplebuffer<T, 1024>([](T phase) {return std::sin(phase*M_PI*2); });
+  };
+#pragma endregion
+
 #pragma region unit generators
   template<typename T>
   class noise final : unit<T>
@@ -747,29 +758,24 @@ namespace vessl
   class oscil final : public unit<T>
   {
   public:
-    typedef T(*func)(T);
+    using waveform = waveform<T>;
 
-    oscil(func w, T freqInHz = 440)
+    oscil(const waveform& w, T freqInHz = 440)
       : io(this)
       , wave(w)
-      , fhz(freqInHz)
       , phase(0)
-      , fma(1)
     {
+      io.in[0] = freqInHz;
     }
 
-    func wave;
+    const waveform& wave;
 
     polarity::type polarity = polarity::bipolar;
 
     /// center frequency in Hz
-    T fhz;
+    input& fhz = io.in[0];
     /// frequency in 1v/oct range, relative to fhz
-    input& fv = io.in[0];
-    /// frequency modulation in 1v/oct range, applied to fv
-    input& fm = io.in[1];
-    /// amount of fm to apply
-    T fma;
+    input& fvoct = io.in[1];
     /// current value of the oscillator
     output& out = io.out[0];
 
@@ -778,9 +784,9 @@ namespace vessl
 
     void tick(T deltaTime) override
     {
-      io.out[0] = this->polarity ? wave(phase) : wave(phase)*0.5 + 0.5;
-      phase += fhz * deltaTime * pow(2., io.in[0] + fma*io.in[1]);
-      phase -= std::floor(phase);
+      io.out[0] = this->polarity ? wave.value(phase) : wave.value(phase)*0.5 + 0.5;
+      phase += io.in[0] * deltaTime * pow(2., io.in[1]);
+      phase = wrapPhase<T>(phase);
     }
 
     void reset()

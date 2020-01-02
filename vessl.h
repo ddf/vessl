@@ -223,6 +223,20 @@ namespace vessl
     UT * u;
   };
 
+  template<typename T, int N, typename E>
+  struct proxyarray : public array<E>
+  {
+    using value = value<T>;
+    proxyarray(value * const wrap) : ref(wrap) {}
+
+    std::size_t size() const override { return N; }
+
+    E& operator[](std::size_t i)       override { return ref[i]; }
+    const E& operator[](std::size_t i) const override { return ref[i]; }
+
+    value * const ref;
+  };
+
   template<typename T, int I, int O>
   class io final
   {
@@ -251,21 +265,8 @@ namespace vessl
     array<output>& outputs() { return out_proxy; }
 
   private:
-    template<int N, typename E>
-    struct proxyarray : public array<E>
-    {
-      proxyarray(value * const wrap) : ref(wrap) {}
-
-      std::size_t size() const override { return N; }
-
-            E& operator[](std::size_t i)       override { return ref[i]; }
-      const E& operator[](std::size_t i) const override { return ref[i]; }
-
-      value * const ref;
-    };
-
-    proxyarray<I, input>  in_proxy;
-    proxyarray<O, output> out_proxy;
+    proxyarray<T, I, input>  in_proxy;
+    proxyarray<T, O, output> out_proxy;
   };
 #pragma endregion
 
@@ -627,7 +628,7 @@ namespace vessl
   public:
     mixer(T masterVolume)
       : audio(this)
-      , volCtrl(this)
+      , volProxy(volCtrl)
       , masterCtrl(this, masterVolume)
     {
       // default all volume controls to 1
@@ -652,7 +653,7 @@ namespace vessl
     T matrix[I][O];
 
     /// volume modulation for each input
-    array<input>& vol = volCtrl.inputs();
+    array<input>& vol = volProxy;
 
     /// master volume applied to each output after accumulating inputs
     input& master = masterCtrl;
@@ -670,7 +671,7 @@ namespace vessl
         // sum all inputs to this output based on matrix and volume settings
         for (int i = 0; i < I; ++i)
         {
-          v += audio.in[i] * matrix[i][o] * volCtrl.in[i] * mv;
+          v += audio.in[i] * matrix[i][o] * volCtrl[i] * mv;
         }
         audio.out[o] = v;
       }
@@ -679,7 +680,8 @@ namespace vessl
   private:
     // audio in/out
     io<T, I, O> audio;
-    io<T, I, 0> volCtrl;
+    value<T> volCtrl[I];
+    proxyarray<T, I, input> volProxy;
     value<T> masterCtrl;
   };
 

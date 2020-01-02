@@ -716,6 +716,33 @@ namespace vessl
     unit::input& factor = io.in[1];
   };
 
+  // sums all inputs to a single output
+  template<typename T, int I>
+  class summer final : public unit<T>
+  {
+  public:
+    summer() : io(this) { }
+
+    array<input>& in = io.inputs();
+    output& out = io.out[0];
+
+    array<input>& inputs() override { return in; }
+    array<output>& outputs() override { return io.outputs(); }
+
+    void tick(T deltaTime) override
+    {
+      T sum = 0;
+      for (int i = 0, sz = in.size(); i < sz; ++i)
+      {
+        sum += io.in[i];
+      }
+      io.out[0] = sum;
+    }
+
+  private:
+    io<T, I, 1> io;
+  };
+
   template<typename T>
   class oscil final : public unit<T>
   {

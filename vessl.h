@@ -323,33 +323,37 @@ namespace vessl
   template<typename T>
   T sample(const T* samples, T fidx, interpolation::type interp = interpolation::linear)
   {
+    assert(fidx >= 0 && "fidx argument to sample must be non-negative!");
+
     switch (interp)
     {
       case interpolation::nearest:
         return samples[static_cast<size_t>(std::round(fidx))];
 
       case interpolation::linear:
-  {
-	  T idx;
-	  const T frac = std::modf(fidx, &idx);
-	  const size_t x0 = static_cast<size_t>(idx);
-	  return samples[x0] + (samples[x0 + 1] - samples[x0])*frac;
-  }
+      {
+        T idx;
+        const T frac = std::modf(fidx, &idx);
+        const size_t x0 = static_cast<size_t>(idx);
+        return samples[x0] + (samples[x0 + 1] - samples[x0])*frac;
+      }
 
       case interpolation::cubic:
-  {
-	  static const T div6 = static_cast<T>(1. / 6.);
-	  static const T div2 = static_cast<T>(0.5);
+      {
+        static const T div6 = static_cast<T>(1. / 6.);
+        static const T div2 = static_cast<T>(0.5);
 
-	  T idx;
-	  const T f = std::modf(fidx, &idx);
-	  const T fm1 = f - 1.;
-	  const T fm2 = f - 2.;
-	  const T fp1 = f + 1;
-	  const size_t x0 = static_cast<size_t>(idx);
-	  return -f*fm1*fm2*div6 * samples[x0 - 1] + fp1*fm1*fm2*div2 * samples[x0] - fp1*f*fm2*div2 * samples[x0 + 1] + fp1*f*fm1*div6 * samples[x0 + 2];
-  }
-    }	
+        T idx;
+        const T f = std::modf(fidx, &idx);
+        const T fm1 = f - 1.;
+        const T fm2 = f - 2.;
+        const T fp1 = f + 1;
+        const size_t x0 = static_cast<size_t>(idx);
+        return -f * fm1*fm2*div6 * samples[x0 - 1] + fp1 * fm1*fm2*div2 * samples[x0] - fp1 * f*fm2*div2 * samples[x0 + 1] + fp1 * f*fm1*div6 * samples[x0 + 2];
+      }
+    }
+
+    return 0;
   }
 
   // a fixed-sized buffer that supports safely sampling it with a fractional index in the range [0, N-1],
@@ -358,7 +362,9 @@ namespace vessl
   class samplebuffer final : public waveform<T>
   {
   public:
-    samplebuffer() : buffer({}) { }
+    samplebuffer()
+    {
+    }
 
     samplebuffer(const T(&values)[N])
     {
@@ -424,7 +430,7 @@ namespace vessl
     }
 
   private:
-    T buffer[N+3];
+    T buffer[N + 3] = {};
   };
 
   template<typename T, std::size_t N>
@@ -469,7 +475,7 @@ namespace vessl
     T buffer[N];
     std::size_t write = 0;
     std::size_t read = 0;
-  };
+  };  
 #pragma endregion
 
 #pragma region waveforms
@@ -533,7 +539,9 @@ namespace vessl
             sum += whiteValues[i];
           }
           maxSum = std::max<T>(sum, maxSum);
-          return 2 * (sum / maxSum) - 1;
+          T n = 2 * (sum / maxSum) - 1;
+          assert(!isnan(n) && "pink noise generated nan");
+          return n;
         }
       }
 

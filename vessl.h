@@ -562,6 +562,54 @@ namespace vessl
     io<T, 1, 1> io;
   };
 
+  // unit that generates a linear ramp from one value to another over a duration of seconds
+  template<typename T>
+  class ramp final : public unit<T>
+  {
+  public:
+    ramp(T valueBegin = 0, T valueEnd = 0, T rampDuration = 0)
+      : io(this)
+    {
+      io.in[0] = valueBegin;
+      io.in[1] = valueEnd;
+      io.in[2] = rampDuration;
+      io.out[0] = valueBegin;
+    }
+
+    input& begin = io.in[0];
+    input& end = io.in[1];
+    input& duration = io.in[2];
+
+    output& value = io.out[0];
+
+    array<input>& inputs() override { return io.inputs(); }
+    array<output>& outputs() override { return io.outputs(); }
+
+    bool running() const { return active; }
+
+    void trigger()
+    {
+      io.out[0] = io.in[0];
+      active = true;
+    }
+
+    void tick(T deltaTime)
+    {
+      if (active)
+      {
+        T dur = io.in[2];
+        time += deltaTime;
+        active = time < dur;
+        io.out[0] = active ? lerp<T>(io.in[0], io.in[1], time / dur) : io.in[1];
+      }
+    }
+
+  private:
+    io<T, 3, 1> io;
+    bool active;
+    T time;
+  };
+
   template<typename T, int I, int O>
   class mixer final : public unit<T>
   {

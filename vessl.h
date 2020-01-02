@@ -793,6 +793,42 @@ namespace vessl
     T phase;
   };
 
+  template<typename T>
+  class waveshaper final : public unit<T>
+  {
+  public:
+    using waveform = waveform<T>;
+
+    waveshaper(const waveform& waveShape, bool wrapInput = true)
+      : shape(waveShape)
+      , wrap(wrapInput)
+      , io(this)
+    {
+
+    }
+
+    // input in [-1,1] range that will be used sample the shape waveform
+    input& in = io.in[0];
+    // sampled shape value based on current value of in
+    output& out = io.out[0];
+
+    const waveform& shape;
+    bool wrap = true;
+
+    array<input>& inputs() override { return io.inputs(); }
+    array<output>& outputs() override { return io.outputs(); }
+
+    void tick(T deltaTime) override
+    {
+      assert(!isnan(io.in[0]) && "waveshaper input is nan!");
+      T phase = wrap ? wrapPhase<T>(io.in[0] * 0.5 + 0.5) : clamp<T>(io.in[0] * 0.5 + 0.5, 0, 1);
+      io.out[0] = shape.value(phase);
+    }
+
+  private:
+    io<T, 1, 1> io;
+  };
+
   template<typename T, std::size_t IO, std::size_t MAX_BUFFER_SIZE>
   class delay : unit<T>
   {

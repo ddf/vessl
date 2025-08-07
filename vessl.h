@@ -25,6 +25,17 @@
 #pragma once
 #include <cassert>
 
+// macro for initializing parameters with a name.
+// use this in the constructor of your unit class.
+#define DECLARE_UNIT_PARAMETER(index, name, defaultValue)\
+  this->initParam((index), name, (defaultValue));
+  
+// macro for defining named getters for unit parameters
+// use this in the body of your unit class declaration
+#define DEFINE_UNIT_PARAMETER(index, name)\
+  parameter<T>& name() { return this->params[(index)]; }\
+  const parameter<T>& name() const { return this->params[(index)]; }
+
 namespace vessl
 {
   template<typename T>
@@ -32,6 +43,7 @@ namespace vessl
   {
   public:
     parameter() : n(""), v(0) {}
+    parameter(const char * name, T value) : n(name), v(value) {}
     
     const char* name() const { return n; }
 
@@ -47,13 +59,21 @@ namespace vessl
   class unit
   {
   public:
-    virtual ~unit() = default;
-
-  private:
+    // @todo iterator support
+    
     parameter<T>& getParameter(int idx) { return params[idx]; }
-    static size_t getParameterCount() { return PARAM_COUNT; }
+    const parameter<T>& getParameter(int idx) const { return params[idx]; }
+    
+    // ReSharper disable once CppMemberFunctionMayBeStatic
+    int getParameterCount() { return PARAM_COUNT; }
     
   protected:
+    void initParam(int idx, const char * name, T defaultValue)
+    {
+      assert(idx >= 0 && idx < PARAM_COUNT);
+      params[idx] = parameter<T>(name, defaultValue);
+    }
+    
     parameter<T> params[PARAM_COUNT];
   };
 
@@ -142,7 +162,7 @@ namespace vessl
     return 0;
   }
 
-  // a waveform that can be evaluated using a phase value in the range [0,1)
+  // a waveform that can be evaluated using a phase value, which will be wrapped to the range [0,1)
   template<typename T>
   class waveform
   {
@@ -364,7 +384,7 @@ namespace vessl
     : tint(withTint), dt(1.0f/sampleRate)
     {
       nz[0] = nz[1] = next(withTint, 0);
-      rate() = 1;
+      rate().write(1);
     }
 
     noiseTint tint;
@@ -374,7 +394,7 @@ namespace vessl
 
     T generate() override
     {
-      step += dt * rate();
+      step += dt * rate().read();
       float alpha = step / dt;
       if (alpha >= 1)
       {
@@ -583,20 +603,23 @@ namespace vessl
       : phase(0)
       , dt(1.0f/sampleRate)
     {
-      fHz().write(freqInHz);
+      DECLARE_UNIT_PARAMETER(0, "frequency", freqInHz)
+      DECLARE_UNIT_PARAMETER(1, "fm (linear)", 0)
+      DECLARE_UNIT_PARAMETER(2, "fm (v/oct)", 0)
+      DECLARE_UNIT_PARAMETER(3, "phase mod", 0)
     }
 
     W& waveform() { return wave; }
     const W& waveform() const { return wave; }
 
     // frequency in Hz without FM applied
-    parameter<T>& fHz()   { return this->params[0]; }
-    // linear FM in Hz
-    parameter<T>& fmLin() { return this->params[1]; }
-    // exp FM in v/oct
-    parameter<T>& fmExp() { return this->params[2]; }
+    DEFINE_UNIT_PARAMETER(0, fHz)
+    // linear frequency modulation
+    DEFINE_UNIT_PARAMETER(1, fmLin)
+    // v/oct (exponential) frequency modulation
+    DEFINE_UNIT_PARAMETER(2, fmExp)
     // phase modulation
-    parameter<T>& pm()    { return this->params[3]; }
+    DEFINE_UNIT_PARAMETER(3, pm)
     
     T generate() override
     {

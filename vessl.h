@@ -25,19 +25,25 @@
 #pragma once
 #include <cassert>
 
-// macro for initializing parameters with a name.
-// use this in the constructor of your unit class.
-#define DECLARE_UNIT_PARAMETER(index, name, defaultValue)\
-  this->initParam((index), name, (defaultValue));
-  
-// macro for defining named getters for unit parameters
-// use this in the body of your unit class declaration
-#define DEFINE_UNIT_PARAMETER(index, name)\
-  parameter<T>& name() { return this->params[(index)]; }\
-  const parameter<T>& name() const { return this->params[(index)]; }
-
 namespace vessl
 {
+  template<typename T>
+  class array
+  {
+    T* data;
+    size_t size;
+  public:
+    array() : data(nullptr), size(0) {}
+    array(T* data, size_t size) : data(data), size(size) {}
+
+    T* getData() { return data; }
+    const T* getData() const { return data; }
+    size_t getSize() const { return size; }
+    bool isEmpty() const { return size == 0; }
+    T& operator[](size_t index) { return data[index]; }
+    const T& operator[](size_t index) const { return data[index]; }
+  };
+  
   template<typename T>
   class parameter
   {
@@ -47,55 +53,141 @@ namespace vessl
     
     const char* name() const { return n; }
 
+    // for the sane
     T read() const { return v; }
     parameter& write(T value) { v = value; return *this; }
+
+    // just how much silly syntactic sugar can we add here, lol
+    const T& operator*() const { return v; }
+    operator T*() { return &v; }
+    
+    T operator!() const { return v == T(0) ? T(1) : T(1) / v; }
+    T operator-() const { return -v; }
 
   private:
     const char* n;
     T v;
   };
-  
-  template<typename T, int PARAM_COUNT>
-  class unit
-  {
-  public:
-    // @todo iterator support
-    
-    parameter<T>& getParameter(int idx) { return params[idx]; }
-    const parameter<T>& getParameter(int idx) const { return params[idx]; }
-    
-    // ReSharper disable once CppMemberFunctionMayBeStatic
-    int getParameterCount() { return PARAM_COUNT; }
-    
-  protected:
-    void initParam(int idx, const char * name, T defaultValue)
-    {
-      assert(idx >= 0 && idx < PARAM_COUNT);
-      params[idx] = parameter<T>(name, defaultValue);
-    }
-    
-    parameter<T> params[PARAM_COUNT];
-  };
 
-  enum class interpolation : uint8_t
+  template<typename T>
+  parameter<T>& operator<<(parameter<T>& p, const T& v)
   {
-    nearest,
-    linear,
-    cubic
-  };
+    p.write(v);
+    return p;
+  }
 
-  enum class noiseTint
+  template<typename T>
+  parameter<T>& operator>>(parameter<T>& p, T& v)
   {
-    white,
-    pink,
-    red,
-    brown,
+    v = p.read();
+    return p;
+  }
+
+  template<typename T, size_t N>
+  struct unitInit
+  {
+    const char* name;
+    parameter<T> params[N];
   };
   
   template<typename T>
-  T lerp(T v1, T v2, T a)
+  class unit : public array<parameter<T>>
   {
-    return v1 + (v2 - v1)*a;
+  public:
+    template<size_t N>
+    explicit unit(unitInit<T, N>& init, float sampleRate = 1) : array<parameter<T>>(init.params, N), n(init.name) { setSampleRate(sampleRate); }
+    unit(const char* name, parameter<T>* params, int paramsCount, float sampleRate = 1) : array<parameter<T>>(params, paramsCount), n(name) { setSampleRate(sampleRate); }
+    
+    const char* name() const { return n; }
+    
+    float getSampleRate() const { return sampleRate; }
+    
+    void setSampleRate(float sr)
+    {
+      sampleRate = sr;
+      deltaTime = 1.0f/sr;
+      onSampleRateChanged();
+    }
+
+  protected:
+    virtual void onSampleRateChanged() {}
+    float dt() const { return deltaTime; }
+    
+  private:
+    const char* n;
+    float sampleRate;
+    float deltaTime;
+  };
+
+  template<typename T>
+  class generator : public unit<T>
+  {
+  public:
+    template<size_t N>
+    explicit generator(unitInit<T, N>& init, float sampleRate = 1) : unit<T>(init, sampleRate) {}
+    generator(parameter<T>* params, int paramsCount, float sampleRate = 1) : unit<T>(params, paramsCount, sampleRate) {}
+
+    virtual T generate() { return T(0); }
+  };
+
+  template<typename T>
+  class processor : public unit<T>
+  {
+    template<size_t N>
+    explicit processor(unitInit<T, N>& init, float sampleRate = 1) : unit<T>(init, sampleRate) {}
+    processor(parameter<T>* params, int paramsCount, float sampleRate = 1) : unit<T>(params, paramsCount, sampleRate) {}
+    
+    virtual void process(const T& in, T* out) { *out = in; }
+  };
+  
+  namespace interpolation
+  {
+    template<typename T>
+    struct nearest
+    {
+      T operator()(const T* buffer, double fracIdx)
+      {
+        return buffer[static_cast<size_t>(roundf(fracIdx))];
+      }
+    };
+
+    template<typename T>
+    struct linear
+    {
+      T operator()(const T* buffer, double fracIdx)
+      {
+        T idx;
+        T frac = modf(fracIdx, &idx);
+        size_t x0 = static_cast<size_t>(idx);
+        return buffer[x0] + (buffer[x0 + 1] - buffer[x0])*frac;
+      }
+    };
+
+    template<typename T>
+    struct cubic
+    {
+      T operator()(const T* buffer, double fracIdx)
+      {
+        static const T DIV6 = static_cast<T>(1. / 6.);
+        static const T DIV2 = static_cast<T>(0.5);
+
+        double idx;
+        double f = modf(fracIdx, &idx);
+        double fm1 = f - 1.;
+        double fm2 = f - 2.;
+        double fp1 = f + 1;
+        size_t x0 = static_cast<size_t>(idx);
+        return -f * fm1*fm2*DIV6 * buffer[x0 - 1] + fp1 * fm1*fm2*DIV2 * buffer[x0] - fp1 * f*fm2*DIV2 * buffer[x0 + 1] + fp1 * f*fm1*DIV6 * buffer[x0 + 2];
+      }
+    };
+  };
+  
+  template<typename T, typename I = interpolation::linear<T>>
+  T sample(const T* buffer, double fracIdx)
+  {
+    assert(fracIdx >= 0 && "fracIdx argument to sample must be non-negative!");
+    static I interpolator;
+    return interpolator(buffer, fracIdx);
   }
 
   template<typename T>
@@ -114,78 +206,31 @@ namespace vessl
   }
 
   template<typename T>
-  T wrap01(T val)
-  {
-    return wrap(val, T(0), T(1));
-  }
+  T wrap01(T val) { return wrap(val, T(0), T(1)); }
 
   template<>
-  inline float wrap01(float v)
-  {
-    float i;
-    return modf(v, &i);
-  }
-
-  template<typename T>
-  T sample(const T* buffer, double fracIdx, interpolation interp = interpolation::linear)
-  {
-    assert(fracIdx >= 0 && "fracIdx argument to sample must be non-negative!");
-
-    switch (interp)
-    {
-      case interpolation::nearest:
-        return buffer[static_cast<size_t>(roundf(fracIdx))];
-
-      case interpolation::linear:
-      {
-        T idx;
-        const T frac = modf(fracIdx, &idx);
-        const size_t x0 = static_cast<size_t>(idx);
-        return buffer[x0] + (buffer[x0 + 1] - buffer[x0])*frac;
-      }
-
-      case interpolation::cubic:
-      {
-        static const T DIV6 = static_cast<T>(1. / 6.);
-        static const T DIV2 = static_cast<T>(0.5);
-
-        double idx;
-        double f = modf(fracIdx, &idx);
-        double fm1 = f - 1.;
-        double fm2 = f - 2.;
-        double fp1 = f + 1;
-        size_t x0 = static_cast<size_t>(idx);
-        return -f * fm1*fm2*DIV6 * buffer[x0 - 1] + fp1 * fm1*fm2*DIV2 * buffer[x0] - fp1 * f*fm2*DIV2 * buffer[x0 + 1] + fp1 * f*fm1*DIV6 * buffer[x0 + 2];
-      }
-    }
-
-    return 0;
-  }
+  inline float wrap01(float v) { float i; return modf(v, &i); }
 
   // a waveform that can be evaluated using a phase value, which will be wrapped to the range [0,1)
   template<typename T>
   class waveform
   {
   public:
-    T operator()(double phase) const
-    {
-      return eval(wrap01(phase));
-    }
+    T operator()(double phase) const { return eval(wrap01(phase)); }
+    
   protected:
     virtual T eval(double phase) const = 0;
   };
   
   // a fixed-sized buffer that supports safely sampling it with a fractional index in the range [0, N-1],
-  // or with a normalized "at" position in the range [0,1] where 0 will return buffer[0] and 1 will return buffer[N-1].
-  template<typename T, size_t N, interpolation I = interpolation::linear>
-  class samplebuffer final : public waveform<T>
+  // or with a normalized position (i.e. phase) in the range [0,1] where 0 will return buffer[0] and 1 will return buffer[N-1].
+  template<typename T, size_t N, typename I = interpolation::linear<T>>
+  class wavetable final : public waveform<T>
   {
   public:
-    samplebuffer()
-    {
-    }
+    wavetable() {}
 
-    samplebuffer(const T(&values)[N])
+    wavetable(const T(&values)[N])
     {
       for (int i = 0; i < N; ++i)
       {
@@ -199,7 +244,7 @@ namespace vessl
       buffer[N+2] = buffer[2];
     }
 
-    samplebuffer(const waveform<T>& generator)
+    wavetable(const waveform<T>& generator)
     {
       double phase = 0;
       double step = T(1) / N;
@@ -216,7 +261,7 @@ namespace vessl
       buffer[N + 2] = buffer[2];
     }
 
-    static size_t size()
+    size_t size() const
     {
       return N;
     }
@@ -241,7 +286,7 @@ namespace vessl
 
     T sample(double fracIdx) const
     {
-      return vessl::sample(buffer, fracIdx+1, I);
+      return vessl::sample(buffer, fracIdx+1);
     }
 
   protected:
@@ -296,6 +341,13 @@ namespace vessl
     size_t read = 0;
   };
 
+  // @todo easings namespace similar to interpolation namespace
+  template<typename T>
+  T lerp(T v1, T v2, T a)
+  {
+    return v1 + (v2 - v1)*a;
+  }
+  
   static constexpr double pi = 3.14159265358979323846;
 
   namespace waves
@@ -310,155 +362,179 @@ namespace vessl
     template<>
     inline float sine<float>::eval(double phase) const { return sinf(static_cast<float>(2 * pi * phase)); }
   }
-
-  template<typename T>
-  class generator
+  
+  enum class noiseTint : uint8_t
   {
-  public:
-    virtual T generate() = 0;
+    white,
+    pink,
+    red,
+    brown,
   };
   
   template<typename T>
-  class noise final : public unit<T, 1>, public generator<T>
+  class noise final : public generator<T>
   {
+    unitInit<T, 2> init = {
+      "noise", {{ "tint", 0 }, { "rate", 1 }}
+    };
+
+    using unit<T>::dt;
+    
   public:
-    static T next(noiseTint tint, T dt)
-    {
-      switch (tint)
-      {
-        case noiseTint::white:
-        {
-          return 2 * ((T)rand() / RAND_MAX) - 1;
-        }
-
-        // #TODO: this contains clicks when run at audio frequency and I'm not sure why.
-        // Need to either read up on how to do this properly and write a new implementation,
-        // or find some open source code that can be used without causing license issues.
-        case noiseTint::red:
-        case noiseTint::brown:
-        {
-          static const T RC = static_cast<T>(1) / (pi * 200);
-          static const T AC = 6.2;
-          static T prev = 0;
-          T alpha = dt / (dt + RC);
-          T white = 2 * (static_cast<T>(rand()) / RAND_MAX) - 1;
-          prev = lerp<T>(prev, white, alpha);
-          return prev * AC;
-        }
-
-        // This is the Voss algorithm (see: http://www.firstpr.com.au/dsp/pink-noise/)
-        // Would be good to dig into the improvements on the algorithm mentioned later in the article.
-        case noiseTint::pink:
-        {
-          static constexpr int RANGE = 128;
-          static constexpr int MAX_KEY = 0x1f;
-          static int key = 0;
-          static T maxSum = 90;
-          static int whiteValues[6] = { rand() % (RANGE / 6), rand() % (RANGE / 6), rand() % (RANGE / 6), rand() % (RANGE / 6), rand() % (RANGE / 6), rand() % (RANGE / 6) };
-
-          int lastKey = key;
-          T sum = 0;
-          key = key == MAX_KEY ? 0 : ++key;
-
-          int diff = lastKey ^ key;
-          for (int i = 0; i < 6; ++i)
-          {
-            if ((diff & (1 << i)) != 0)
-            {
-              whiteValues[i] = rand() % (RANGE / 6);
-            }
-            sum += whiteValues[i];
-          }
-          maxSum = std::max<T>(sum, maxSum);
-          T n = 2 * (sum / maxSum) - 1;
-          assert(!isnan(n) && "pink noise generated nan");
-          return n;
-        }
-      }
-
-      return 0;
-    }
-
-  public:
-    noise(noiseTint withTint, float sampleRate)
-    : tint(withTint), dt(1.0f/sampleRate)
+    noise(float sampleRate, noiseTint withTint = noiseTint::white)
+    : generator<T>(init, sampleRate), step(0)
     {
       nz[0] = nz[1] = next(withTint, 0);
-      rate().write(1);
+      tint().write(static_cast<float>(withTint));
     }
 
-    noiseTint tint;
+    parameter<T>& tint() { return init.params[0]; }
+    parameter<T>& rate() { return init.params[1]; }
 
-    using unit<T,1>::params;
-    parameter<T>& rate() { return params[0]; }
+    static T next(noiseTint tint, T dt);
 
     T generate() override
     {
-      step += dt * rate().read();
-      float alpha = step / dt;
+      step += dt() * rate().read();
+      float alpha = step / dt();
       if (alpha >= 1)
       {
+        noiseTint tnt = static_cast<noiseTint>(tint().read());
         nz[0] = nz[1];
-        nz[1] = next(tint, dt);
+        nz[1] = next(tnt, dt());
         alpha = wrap01(alpha);
-        step = alpha * dt;
+        step = alpha * dt();
       }
       return lerp(nz[0], nz[1], alpha);
     }
 
   private:
-    float dt;
-    float step = 0;
+    float step;
     T nz[2];
   };
-  //
-  // // unit that generates a linear ramp from one value to another over a duration of seconds
-  // template<typename T>
-  // class ramp final : public unit<T>
-  // {
-  // public:
-  //   ramp(T valueBegin = 0, T valueEnd = 0, T rampDuration = 0)
-  //     : io(this)
-  //   {
-  //     io.in[0] = valueBegin;
-  //     io.in[1] = valueEnd;
-  //     io.in[2] = rampDuration;
-  //     io.out[0] = valueBegin;
-  //   }
-  //
-  //   input& begin = io.in[0];
-  //   input& end = io.in[1];
-  //   input& duration = io.in[2];
-  //
-  //   output& value = io.out[0];
-  //
-  //   array<input>& inputs() override { return io.inputs(); }
-  //   array<output>& outputs() override { return io.outputs(); }
-  //
-  //   bool running() const { return active; }
-  //
-  //   void trigger()
-  //   {
-  //     io.out[0] = io.in[0];
-  //     active = true;
-  //   }
-  //
-  //   void tick(T deltaTime)
-  //   {
-  //     if (active)
-  //     {
-  //       T dur = io.in[2];
-  //       time += deltaTime;
-  //       active = time < dur;
-  //       io.out[0] = active ? lerp<T>(io.in[0], io.in[1], time / dur) : io.in[1];
-  //     }
-  //   }
-  //
-  // private:
-  //   io<T, 3, 1> io;
-  //   bool active;
-  //   T time;
-  // };
+
+  template<typename T>
+  T noise<T>::next(noiseTint tint, T dt) {
+    switch (tint)
+    {
+      case noiseTint::white:
+      {
+        return 2 * ((T)rand() / RAND_MAX) - 1;
+      }
+
+      // #TODO: this contains clicks when run at audio frequency and I'm not sure why.
+      // Need to either read up on how to do this properly and write a new implementation,
+      // or find some open source code that can be used without causing license issues.
+      case noiseTint::red:
+      case noiseTint::brown:
+      {
+        static const T RC = static_cast<T>(1) / (pi * 200);
+        static const T AC = 6.2;
+        static T prev = 0;
+        T alpha = dt / (dt + RC);
+        T white = 2 * (static_cast<T>(rand()) / RAND_MAX) - 1;
+        prev = lerp<T>(prev, white, alpha);
+        return prev * AC;
+      }
+
+      // This is the Voss algorithm (see: http://www.firstpr.com.au/dsp/pink-noise/)
+      // Would be good to dig into the improvements on the algorithm mentioned later in the article.
+      case noiseTint::pink:
+      {
+        static constexpr int RANGE = 128;
+        static constexpr int MAX_KEY = 0x1f;
+        static int key = 0;
+        static T maxSum = 90;
+        static int whiteValues[6] = { rand() % (RANGE / 6), rand() % (RANGE / 6), rand() % (RANGE / 6), rand() % (RANGE / 6), rand() % (RANGE / 6), rand() % (RANGE / 6) };
+
+        int lastKey = key;
+        T sum = 0;
+        key = key == MAX_KEY ? 0 : ++key;
+
+        int diff = lastKey ^ key;
+        for (int i = 0; i < 6; ++i)
+        {
+          if ((diff & (1 << i)) != 0)
+          {
+            whiteValues[i] = rand() % (RANGE / 6);
+          }
+          sum += whiteValues[i];
+        }
+        maxSum = std::max<T>(sum, maxSum);
+        T n = 2 * (sum / maxSum) - 1;
+        assert(!isnan(n) && "pink noise generated nan");
+        return n;
+      }
+    }
+
+    return 0;
+  }
+
+  
+  // unit that generates a linear ramp from one value to another over a duration of seconds
+  // @todo implement easings above and add that as a template parameter
+  template<typename T>
+  class ramp final : public generator<T>
+  {
+    unitInit<T, 4> init {
+      "ramp", {{"begin", 0}, {"end", 0}, {"duration", 0}, {"eor", 0}}
+    };
+
+    using unit<T>::dt;
+    
+  public:
+    ramp(float sampleRate, float durationInSeconds = 0, float valueBegin = 0, float valueEnd = 0) : generator<T>(init, sampleRate)
+    , t(0)
+    {
+      // this is fun
+      begin() << valueBegin;
+      end() << valueEnd;
+      duration() << durationInSeconds;
+    }
+
+    // ins
+    parameter<T>& begin() { return init.params[0]; }
+    parameter<T>& end() { return init.params[1]; }
+    parameter<T>& duration() { return init.params[2]; }
+
+    // outs
+    const parameter<T>& eor() const { return init.params[3]; }
+    // could also add t as an out.
+      
+    bool isActive() const { return *eor() < 1; }
+  
+    void trigger()
+    {
+      if (*duration() > 0)
+      {
+        t = 0;
+        _eor() << T(0);
+      }
+      else
+      {
+        t = 1;
+        _eor() << T(1);
+      }
+    }
+  
+    T generate() override
+    {
+      float lt = t;
+      if (isActive())
+      {
+        t += dt() * !duration();
+        if (t >= 1)
+        {
+          _eor() << T(1);
+        }
+      }
+      return lerp<T>(*begin(), *end(), lt);
+    }
+  
+  private:
+    parameter<T>& _eor() { return init.params[3]; }
+    float t;
+  };
   //
   // template<typename T, int I, int O>
   // class mixer final : public unit<T>
@@ -595,48 +671,47 @@ namespace vessl
   // };
 
   template<typename T, typename W>
-  class oscil final : public unit<T, 4>, public generator<T>
+  class oscil final : public generator<T>
   {
+    W wave;
+    T phase;
+    T dt;
+
+    unitInit<T, 4> init = {
+      "oscil", {{ "frequency", 0 }, { "fm (lin)", 0 }, { "fm (v/oct)", 0 }, { "phase mod", 0 }}
+    };
     
   public:
-    oscil(T sampleRate, T freqInHz = 440)
-      : phase(0)
-      , dt(1.0f/sampleRate)
+    oscil(T sampleRate, T freqInHz = 440) : generator<T>(init)
+    , phase(0) , dt(1.0f/sampleRate)
     {
-      DECLARE_UNIT_PARAMETER(0, "frequency", freqInHz)
-      DECLARE_UNIT_PARAMETER(1, "fm (linear)", 0)
-      DECLARE_UNIT_PARAMETER(2, "fm (v/oct)", 0)
-      DECLARE_UNIT_PARAMETER(3, "phase mod", 0)
+      fHz().write(freqInHz);
     }
 
     W& waveform() { return wave; }
     const W& waveform() const { return wave; }
 
     // frequency in Hz without FM applied
-    DEFINE_UNIT_PARAMETER(0, fHz)
+    parameter<T>& fHz() { return init.params[0]; }
     // linear frequency modulation
-    DEFINE_UNIT_PARAMETER(1, fmLin)
+    parameter<T>& fmLin() { return init.params[1]; }
     // v/oct (exponential) frequency modulation
-    DEFINE_UNIT_PARAMETER(2, fmExp)
+    parameter<T>& fmExp() { return init.params[2]; }
     // phase modulation
-    DEFINE_UNIT_PARAMETER(3, pm)
+    parameter<T>& pm() { return init.params[3]; }
     
     T generate() override
     {
+      T val = wave(phase + pm().read()); 
       phase += (fHz().read()*exp2(fmExp().read()) + fmLin().read())*dt;
       phase = wrap01(phase);
-      return wave(phase + pm().read());
+      return val;
     }
 
     void reset()
     {
       phase = 0;
     }
-
-  private:
-    W wave;
-    T phase;
-    T dt;
   };
   
 //

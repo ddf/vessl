@@ -25,6 +25,10 @@
 #pragma once
 #include <cassert>
 
+#ifndef PI
+#define PI 3.14159265358979323846
+#endif
+
 namespace vessl
 {
   template<typename T>
@@ -42,6 +46,10 @@ namespace vessl
     bool isEmpty() const { return size == 0; }
     T& operator[](size_t index) { return data[index]; }
     const T& operator[](size_t index) const { return data[index]; }
+
+    // ranged-based for support
+    T* begin() { return data; }
+    T* end() { return data + size; }
   };
   
   template<typename T>
@@ -61,13 +69,22 @@ namespace vessl
     const T& operator*() const { return v; }
     operator T*() { return &v; }
     
-    T operator!() const { return v == T(0) ? T(1) : T(1) / v; }
+    T operator!() const { return v == 0 ? T(1) : T(1) / v; }
     T operator-() const { return -v; }
 
   private:
     const char* n;
     T v;
   };
+
+  template<>
+  inline float parameter<float>::operator!() const { return v > 0 && v < FLT_EPSILON ? 1.0f : 1.0f / v; }
+
+  template<>
+  inline double parameter<double>::operator!() const { return v > 0 && v < DBL_EPSILON ? 1.0 : 1.0 / v; }
+
+  template<>
+  inline long double parameter<long double>::operator!() const { return v > 0 && v < LDBL_EPSILON ? 1.0 : 1.0 / v; }
 
   template<typename T>
   parameter<T>& operator<<(parameter<T>& p, const T& v)
@@ -83,20 +100,53 @@ namespace vessl
     return p;
   }
 
+  template<typename T>
+  class generator
+  {
+  public:
+    generator() = default;
+    virtual ~generator() = default;
+    generator(const generator&) = delete;
+    generator(const generator&&) = delete;
+    generator& operator=(const generator&) = delete;
+    generator& operator=(generator&&) = delete;
+    
+    virtual T generate() = 0;  // NOLINT(portability-template-virtual-member-function)
+  };
+
+  template<typename T>
+  class processor
+  {
+  public:
+    processor() = default;
+    virtual ~processor() = default;
+    processor(const processor&) = delete;
+    processor(const processor&&) = delete;
+    processor& operator=(const processor&) = delete;
+    processor& operator=(processor&&) = delete;
+    
+    virtual void process(const T& in, T* out) = 0;
+  };
+
   template<typename T, size_t N>
-  struct unitInit
+  struct uinit
   {
     const char* name;
     parameter<T> params[N];
   };
   
   template<typename T>
-  class unit : public array<parameter<T>>
+  class unit : array<parameter<T>>
   {
   public:
     template<size_t N>
-    explicit unit(unitInit<T, N>& init, float sampleRate = 1) : array<parameter<T>>(init.params, N), n(init.name) { setSampleRate(sampleRate); }
+    explicit unit(uinit<T, N>& init, float sampleRate = 1) : array<parameter<T>>(init.params, N), n(init.name) { setSampleRate(sampleRate); }
     unit(const char* name, parameter<T>* params, int paramsCount, float sampleRate = 1) : array<parameter<T>>(params, paramsCount), n(name) { setSampleRate(sampleRate); }
+    virtual ~unit() = default;
+    unit(const unit&) = default;
+    unit(unit&&) = default;
+    unit& operator=(const unit&) = default;
+    unit& operator=(unit&&) = default;
     
     const char* name() const { return n; }
     
@@ -109,6 +159,13 @@ namespace vessl
       onSampleRateChanged();
     }
 
+    parameter<T>& getParameter(size_t index) { return this->operator[](index); }
+    const parameter<T>& getParameter(size_t index) const { return this->operator[](index); }
+    size_t getParameterCount() const { return array<parameter<T>>::getSize(); }
+
+    using array<parameter<T>>::begin;
+    using array<parameter<T>>::end;
+
   protected:
     virtual void onSampleRateChanged() {}
     float dt() const { return deltaTime; }
@@ -120,24 +177,21 @@ namespace vessl
   };
 
   template<typename T>
-  class generator : public unit<T>
+  class unitGenerator : public unit<T>, public generator<T>
   {
   public:
     template<size_t N>
-    explicit generator(unitInit<T, N>& init, float sampleRate = 1) : unit<T>(init, sampleRate) {}
-    generator(parameter<T>* params, int paramsCount, float sampleRate = 1) : unit<T>(params, paramsCount, sampleRate) {}
-
-    virtual T generate() { return T(0); }
+    explicit unitGenerator(uinit<T, N>& init, float sampleRate = 1) : unit<T>(init, sampleRate), generator<T>() {}
+    unitGenerator(const char* name, parameter<T>* params, int paramsCount, float sampleRate = 1) : unit<T>(name, params, paramsCount, sampleRate), generator<T>() {}
   };
 
   template<typename T>
-  class processor : public unit<T>
+  class unitProcessor : public unit<T>, public processor<T>
   {
+  public:
     template<size_t N>
-    explicit processor(unitInit<T, N>& init, float sampleRate = 1) : unit<T>(init, sampleRate) {}
-    processor(parameter<T>* params, int paramsCount, float sampleRate = 1) : unit<T>(params, paramsCount, sampleRate) {}
-    
-    virtual void process(const T& in, T* out) { *out = in; }
+    explicit unitProcessor(uinit<T, N>& init, float sampleRate = 1) : unit<T>(init, sampleRate), processor<T>() {}
+    unitProcessor(const char* name, parameter<T>* params, int paramsCount, float sampleRate = 1) : unit<T>(name, params, paramsCount, sampleRate), processor<T>() {}
   };
   
   namespace interpolation
@@ -216,11 +270,33 @@ namespace vessl
   class waveform
   {
   public:
+    waveform() = default;
+    virtual ~waveform() = default;
+    waveform(const waveform&) = delete;
+    waveform(const waveform&&) = delete;
+    waveform& operator=(const waveform&) = delete;
+    waveform& operator=(waveform&&) = delete;
+    
     T operator()(double phase) const { return eval(wrap01(phase)); }
     
   protected:
-    virtual T eval(double phase) const = 0;
+    virtual T eval(double phase) const = 0;  // NOLINT(portability-template-virtual-member-function)
   };
+  
+  namespace waves
+  {
+    template<typename T = double>
+    class sine final : public waveform<T>
+    {
+    public:
+      sine() = default;
+    protected:
+      T eval(double phase) const override { return sin(2*PI*phase); }
+    };
+    
+    template<>
+    inline float sine<float>::eval(double phase) const { return sinf(static_cast<float>(2 * PI * phase)); }
+  }
   
   // a fixed-sized buffer that supports safely sampling it with a fractional index in the range [0, N-1],
   // or with a normalized position (i.e. phase) in the range [0,1] where 0 will return buffer[0] and 1 will return buffer[N-1].
@@ -228,9 +304,9 @@ namespace vessl
   class wavetable final : public waveform<T>
   {
   public:
-    wavetable() {}
+    wavetable(): waveform<T>() {}
 
-    wavetable(const T(&values)[N])
+    wavetable(const T(&values)[N]): waveform<T>()
     {
       for (int i = 0; i < N; ++i)
       {
@@ -239,12 +315,12 @@ namespace vessl
 
       // configure extra values on the ends of the buffer
       // so that sampling buffers that are periodic waveforms will work correctly
-      buffer[0]   = buffer[N];
-      buffer[N+1] = buffer[1];
-      buffer[N+2] = buffer[2];
+      buffer[0] = buffer[N];
+      buffer[N + 1] = buffer[1];
+      buffer[N + 2] = buffer[2];
     }
 
-    wavetable(const waveform<T>& generator)
+    wavetable(const waveform<T>& generator): waveform<T>()
     {
       double phase = 0;
       double step = T(1) / N;
@@ -261,6 +337,7 @@ namespace vessl
       buffer[N + 2] = buffer[2];
     }
 
+    // ReSharper disable once CppMemberFunctionMayBeStatic
     size_t size() const
     {
       return N;
@@ -348,21 +425,6 @@ namespace vessl
     return v1 + (v2 - v1)*a;
   }
   
-  static constexpr double pi = 3.14159265358979323846;
-
-  namespace waves
-  {
-    template<typename T = double>
-    class sine : public waveform<T>
-    {
-    protected:
-      T eval(double phase) const override { return sin(2*pi*phase); }
-    };
-    
-    template<>
-    inline float sine<float>::eval(double phase) const { return sinf(static_cast<float>(2 * pi * phase)); }
-  }
-  
   enum class noiseTint : uint8_t
   {
     white,
@@ -372,21 +434,26 @@ namespace vessl
   };
   
   template<typename T>
-  class noise final : public generator<T>
+  class noise final : public unitGenerator<T>
   {
-    unitInit<T, 2> init = {
+    uinit<T, 2> init = {
       "noise", {{ "tint", 0 }, { "rate", 1 }}
     };
 
     using unit<T>::dt;
     
   public:
-    noise(float sampleRate, noiseTint withTint = noiseTint::white)
-    : generator<T>(init, sampleRate), step(0)
+    explicit noise(float sampleRate, noiseTint withTint = noiseTint::white)
+    : unitGenerator<T>(init, sampleRate), step(0)
     {
       nz[0] = nz[1] = next(withTint, 0);
       tint().write(static_cast<float>(withTint));
     }
+    noise(const noise&) = default;
+    noise(noise&&) = default;
+    noise& operator=(const noise&) = default;
+    noise& operator=(noise&&) = default;
+    ~noise() override = default;
 
     parameter<T>& tint() { return init.params[0]; }
     parameter<T>& rate() { return init.params[1]; }
@@ -419,7 +486,7 @@ namespace vessl
     {
       case noiseTint::white:
       {
-        return 2 * ((T)rand() / RAND_MAX) - 1;
+        return 2 * (static_cast<T>(rand()) / RAND_MAX) - 1;
       }
 
       // #TODO: this contains clicks when run at audio frequency and I'm not sure why.
@@ -428,7 +495,7 @@ namespace vessl
       case noiseTint::red:
       case noiseTint::brown:
       {
-        static const T RC = static_cast<T>(1) / (pi * 200);
+        static const T RC = static_cast<T>(1) / (PI * 200);
         static const T AC = 6.2;
         static T prev = 0;
         T alpha = dt / (dt + RC);
@@ -474,27 +541,32 @@ namespace vessl
   // unit that generates a linear ramp from one value to another over a duration of seconds
   // @todo implement easings above and add that as a template parameter
   template<typename T>
-  class ramp final : public generator<T>
+  class ramp final : public unitGenerator<T>
   {
-    unitInit<T, 4> init {
+    uinit<T, 4> init {
       "ramp", {{"begin", 0}, {"end", 0}, {"duration", 0}, {"eor", 0}}
     };
 
     using unit<T>::dt;
     
   public:
-    ramp(float sampleRate, float durationInSeconds = 0, float valueBegin = 0, float valueEnd = 0) : generator<T>(init, sampleRate)
+    explicit ramp(float sampleRate, float durationInSeconds = 0, float fromValue = 0, float toValue = 0) : unitGenerator<T>(init, sampleRate)
     , t(0)
     {
       // this is fun
-      begin() << valueBegin;
-      end() << valueEnd;
+      from() << fromValue;
+      to() << toValue;
       duration() << durationInSeconds;
     }
+    ramp(const ramp&) = default;
+    ramp(ramp&&) = default;
+    ramp& operator=(const ramp&) = default;
+    ramp& operator=(ramp&&) = default;
+    ~ramp() override = default;
 
     // ins
-    parameter<T>& begin() { return init.params[0]; }
-    parameter<T>& end() { return init.params[1]; }
+    parameter<T>& from() { return init.params[0]; }
+    parameter<T>& to() { return init.params[1]; }
     parameter<T>& duration() { return init.params[2]; }
 
     // outs
@@ -508,12 +580,12 @@ namespace vessl
       if (*duration() > 0)
       {
         t = 0;
-        _eor() << T(0);
+        eor_() << T(0);
       }
       else
       {
         t = 1;
-        _eor() << T(1);
+        eor_() << T(1);
       }
     }
   
@@ -525,14 +597,14 @@ namespace vessl
         t += dt() * !duration();
         if (t >= 1)
         {
-          _eor() << T(1);
+          eor_() << T(1);
         }
       }
-      return lerp<T>(*begin(), *end(), lt);
+      return lerp<T>(*from(), *to(), lt);
     }
   
   private:
-    parameter<T>& _eor() { return init.params[3]; }
+    parameter<T>& eor_() { return init.params[3]; }
     float t;
   };
   //
@@ -671,22 +743,27 @@ namespace vessl
   // };
 
   template<typename T, typename W>
-  class oscil final : public generator<T>
+  class oscil final : public unitGenerator<T>
   {
     W wave;
     T phase;
     T dt;
 
-    unitInit<T, 4> init = {
+    uinit<T, 4> init = {
       "oscil", {{ "frequency", 0 }, { "fm (lin)", 0 }, { "fm (v/oct)", 0 }, { "phase mod", 0 }}
     };
     
   public:
-    oscil(T sampleRate, T freqInHz = 440) : generator<T>(init)
+    explicit oscil(T sampleRate, T freqInHz = 440) : unitGenerator<T>(init)
     , phase(0) , dt(1.0f/sampleRate)
     {
       fHz().write(freqInHz);
     }
+    oscil(const oscil&) = default;
+    oscil(oscil&&) = default;
+    oscil& operator=(const oscil&) = default;
+    oscil& operator=(oscil&&) = default;
+    ~oscil() override = default;
 
     W& waveform() { return wave; }
     const W& waveform() const { return wave; }

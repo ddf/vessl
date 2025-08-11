@@ -34,6 +34,7 @@ namespace vessl
   template<typename T>
   class array
   {
+  protected:
     T* data;
     size_t size;
   public:
@@ -53,6 +54,7 @@ namespace vessl
 
     class reader
     {
+    protected:
       const T* begin;
       const T* head;
       const T* end;
@@ -72,36 +74,33 @@ namespace vessl
 
     class writer
     {
-      T* begin;
+    protected:
+      T* head;
       const T* end;
     public:
-      writer(T* data, size_t size) : begin(data), end(data + size) {}
+      writer(T* data, size_t size) : head(data), end(data + size) {}
 
-      size_t available() const { return end - begin; }
-      void write(const T& v) { *begin++ = v; }
+      size_t available() const { return end - head; }
+      void write(const T& v) { *head++ = v; }
 
-      writer operator<<(reader& r)
+      template<typename R>
+      writer operator<<(R& r)
       {
         size_t sz = r.available();
         assert(available() >= sz);
         size_t blocks = sz >> 2u;
+        sz -= blocks*4;
         T a, b, c, d;
         while (blocks--)
         {
-          a = r.read();
-          b = r.read();
-          c = r.read();
-          d = r.read();
-          write(a);
-          write(b);
-          write(c);
-          write(d);
+          a = r.read(); b = r.read(); c = r.read(); d = r.read();
+          write(a); write(b); write(c); write(d);
         }
         while (sz--)
         {
           write(r.read());
         }
-        return writer(begin, available());
+        return writer(head, available());
       }
     };
   };
@@ -114,10 +113,62 @@ namespace vessl
   }
 
   template<typename T>
-  typename array<T>::writer& operator<<(typename array<T>::writer& w, const typename array<T>::reader& r)
+  class ring : array<T>, array<T>::writer, array<T>::reader
   {
+  public:
+    ring(T* inData, size_t inSize) : array<T>(inData, inSize), array<T>::writer(inData, inSize), array<T>::reader(inData, inSize)
+    {
+    }
 
-  }
+    size_t getWriteCapacity() const
+    {
+      return array<T>::writer::head > array<T>::reader::head
+      ? array<T>::writer::available() + (array<T>::reader::head - array<T>::data)
+      : array<T>::reader::head - array<T>::writer::head;
+    }
+    
+    void write(const T& v)
+    {
+      assert(getWriteCapacity() > 0);
+      array<T>::writer::write(v);
+      // reset the writer when we get to the end of our array
+      if (array<T>::writer::available() == 0)
+      {
+        array<T>::writer::head = array<T>::data;
+      }
+    }
+
+    ring& operator<<(typename array<T>::reader& r)
+    {
+      assert(r.available() < getWriteCapacity());
+      while (r)
+      {
+        write(r.read());
+      }
+      return *this;
+    }
+
+    size_t getReadCapacity() const
+    {
+      return array<T>::writer::head >= array<T>::reader::head
+      ? array<T>::writer::head - array<T>::reader::head
+      : array<T>::reader::available() + (array<T>::writer::head - array<T>::data);
+    }
+
+    // fulfill the reader contract for block copy
+    size_t available() const { return getReadCapacity(); }
+
+    const T& read()
+    {
+      assert(getReadCapacity() > 0);
+      const T& result = array<T>::reader::read();
+      if (array<T>::reader::available() == 0)
+      {
+        array<T>::reader::reset();
+      }
+      return result;
+    }
+  };
   
   template<typename T>
   class parameter
@@ -439,50 +490,6 @@ namespace vessl
 
   private:
     T buffer[N + 3] = {};
-  };
-
-  template<typename T, size_t N>
-  class ringbuffer
-  {
-  public:
-    ringbuffer()
-    {
-      memset(buffer, 0, sizeof(buffer));
-    }
-
-    void push(T v)
-    {
-      buffer[index(write++)] = v;
-    }
-
-    T pop()
-    {
-      return buffer[index(read++)];
-    }
-
-    T front()
-    {
-      return buffer[index(read)];
-    }
-
-    void clear()
-    {
-      write = read = 0;
-    }
-
-    size_t size() const { return write - read; }
-
-    size_t capacity() const { return N - size(); }
-
-  private:
-    static size_t index(size_t i)
-    {
-      return i % N;
-    }
-    
-    T buffer[N];
-    size_t write = 0;
-    size_t read = 0;
   };
 
   // @todo easings namespace similar to interpolation namespace

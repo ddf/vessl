@@ -112,10 +112,11 @@ namespace vessl
   }
 
   template<typename T>
-  class ring : array<T>, array<T>::writer, array<T>::reader
+  class ring : array<T>
   {
+    T* head;
   public:
-    ring(T* inData, size_t inSize) : array<T>(inData, inSize), array<T>::writer(inData, inSize), array<T>::reader(inData, inSize)
+    ring(T* inData, size_t inSize) : array<T>(inData, inSize), head(inData + inSize - 1)
     {
     }
 
@@ -123,79 +124,28 @@ namespace vessl
     using array<T>::getData;
     using array<T>::getSize;
 
-    size_t getWriteCapacity() const
-    {
-      return array<T>::writer::head > array<T>::reader::head
-      ? array<T>::writer::available() + (array<T>::reader::head - array<T>::data)
-      : array<T>::reader::head - array<T>::writer::head;
-    }
-
     size_t getWriteIndex() const
     {
-      return array<T>::writer::head - array<T>::data;
+      return head - array<T>::data;
     }
     
     void write(const T& v)
     {
-      size_t cap = getWriteCapacity();
-      assert(cap > 0);
-      array<T>::writer::write(v);
-      // reset the writer when we get to the end of our array
-      if (cap == 1)
+      *head-- = v;
+      if (head == array<T>::begin() - 1)
       {
-        array<T>::writer::head = array<T>::data;
+        head = array<T>::end() - 1;
       }
     }
 
     ring& operator<<(typename array<T>::reader& r)
     {
-      assert(r.available() < getWriteCapacity());
+      assert(r.available() < getSize());
       while (r)
       {
         write(r.read());
       }
       return *this;
-    }
-
-    size_t getReadCapacity() const
-    {
-      return array<T>::writer::head >= array<T>::reader::head
-      ? array<T>::writer::head - array<T>::reader::head
-      : array<T>::reader::available() + (array<T>::writer::head - array<T>::data);
-    }
-
-    // fulfill the reader contract for block copy
-    size_t available() const { return getReadCapacity(); }
-
-    const T& read()
-    {
-      size_t cap = getReadCapacity();
-      assert(cap > 0);
-      const T& result = array<T>::reader::read();
-      if (cap == 1)
-      {
-        array<T>::reader::reset();
-      }
-      return result;
-    }
-
-    // generates fractional index that can be used to
-    // read from the beginning of the underlying array
-    // which is fromWriteHead samples behind the write head.
-    double getReadOffset(double fromWriteHead) const
-    {
-      double sz = getSize();
-      double idx = getWriteIndex();
-      // double i;
-      // double f = modf(fromWriteHead, &i);
-      // idx -= i;
-      // idx -= f;
-      idx -= fromWriteHead;
-      if (idx < 0)
-      {
-        idx += sz;
-      }
-      return idx;
     }
   };
   
@@ -420,7 +370,7 @@ namespace vessl
   }
 #endif
 
-  // a waveform that can be evaluated using a phase value, which will be wrapped to the range [0,1)
+  // a waveform that can be evaluated using a normalized phase value
   template<typename T>
   class waveform
   {
@@ -432,10 +382,7 @@ namespace vessl
     waveform& operator=(const waveform&) = delete;
     waveform& operator=(waveform&&) = delete;
     
-    T operator()(double phase) const { return eval(wrap01(phase)); }
-    
-  protected:
-    virtual T eval(double phase) const = 0;  // NOLINT(portability-template-virtual-member-function)
+    virtual T evaluate(double phase) const = 0;  // NOLINT(portability-template-virtual-member-function)
   };
   
   namespace waves
@@ -445,13 +392,51 @@ namespace vessl
     {
     public:
       sine() = default;
-    protected:
-      T eval(double phase) const override { return sin(2*PI*phase); }
+      T evaluate(double phase) const override { return sin(2*PI*phase); }
     };
     
     template<>
-    inline float sine<float>::eval(double phase) const { return sinf(static_cast<float>(2 * PI * phase)); }
+    inline float sine<float>::evaluate(double phase) const { return sinf(static_cast<float>(2 * PI * phase)); }
   }
+
+  template<typename T>
+  class delayline final : public ring<T>, waveform<T>
+  {
+  public:
+    delayline(T* inData, size_t inSize) : ring<T>(inData, inSize) {}
+
+    using ring<T>::getData;
+    using ring<T>::getSize;
+    using ring<T>::getWriteIndex;
+    
+    // reads behind the write head with sampleDelay (i.e. the ith sample previously written)
+    // where a delay of 0 samples will give the most recently written value.
+    T read(size_t sampleDelay)
+    {
+      assert(sampleDelay < getSize()-1);
+      size_t idx = getWriteIndex() + 1 + sampleDelay;
+      return getData[idx%getSize()];
+    }
+
+    // reads behind the write head with a fractional sampleDelay and given interpolation
+    template<typename I = interpolation::linear<T>>
+    T read(double sampleDelay) const
+    {
+      assert(sampleDelay >= 0 && sampleDelay < getSize() - 1);
+      sampleDelay = getWriteIndex() + 1 + sampleDelay;
+      double idx;
+      double f = modf(sampleDelay, &idx);
+      size_t x0 = static_cast<size_t>(idx) % getSize();
+      size_t x1 = (x0 + 1) % getSize();
+      size_t x2 = (x0 + 2) % getSize();
+      const T* data = getData();
+      T s[3] = { data[x0], data[x1], data[x2] };
+      return sample<T, I>(s, f);
+    }
+
+    // @todo samples the delayline like a waveform, where a phase of 0 is the oldest sample written and 1 is the newest
+    T evaluate(double phase) const override { return 0; }
+  };
   
   // a fixed-sized buffer that supports safely sampling it with a fractional index in the range [0, N-1],
   // or with a normalized position (i.e. phase) in the range [0,1] where 0 will return buffer[0] and 1 will return buffer[N-1].
@@ -890,7 +875,7 @@ namespace vessl
     
     T generate() override
     {
-      T val = wave(phase + pm().read()); 
+      T val = wave.evaluate(phase + pm().read()); 
       phase += (fHz().read()*exp2(fmExp().read()) + fmLin().read())*dt;
       phase = wrap01(phase);
       return val;
@@ -945,7 +930,7 @@ namespace vessl
      uinit<T, 2> init = {
        "delay", {{"time", 0}, {"feedback", 0}}
      };
-     ring<T> buffer;
+     delayline<T> buffer;
      
    public:
      delay(array<T> buffer, float sampleRate, T delayInSeconds = 0, T feedbackAmount = 0) : unitProcessor<T>(init, sampleRate)
@@ -963,12 +948,10 @@ namespace vessl
 
      T process(const T& in) override
      {
-       // delay time in samples, don't allow negative delay times because our buffer will fill up
-       float dts = clamp(*time() * unit<T>::getSampleRate(), 1, (float)buffer.getSize());
+       // delay time in samples
+       float dts = clamp(*time() * unit<T>::getSampleRate(), 0, (float)buffer.getSize()-1);
        T fbk = clamp(*feedback(), -1., 1.);
-       double readIdx = buffer.getReadOffset(dts);
-       T s = sample<T, I>(buffer.getData(), readIdx);
-
+       T s = buffer.template read<I>(dts);
        buffer.write(in + s*fbk);
        return s;
      }

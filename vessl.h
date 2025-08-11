@@ -54,17 +54,20 @@ namespace vessl
     class reader
     {
       const T* begin;
+      const T* head;
       const T* end;
     public:
-      reader(T* data, size_t size) : begin(data), end(data + size) {}
+      reader(T* data, size_t size) : begin(data), head(data), end(data + size) {}
 
-      size_t available() const { return end - begin; }
-      explicit operator bool() const { return begin != end; }
+      size_t available() const { return end - head; }
+      explicit operator bool() const { return head != end; }
 
-      const T& peek() const { return *begin; }
-      const T& operator*() const { return *begin; }
+      const T& peek() const { return *head; }
+      const T& operator*() const { return *head; }
       
-      const T& read() { return *begin++; }
+      const T& read() { return *head++; }
+
+      reader& reset() { head = begin; return *this; }
     };
 
     class writer
@@ -76,6 +79,30 @@ namespace vessl
 
       size_t available() const { return end - begin; }
       void write(const T& v) { *begin++ = v; }
+
+      writer operator<<(reader& r)
+      {
+        size_t sz = r.available();
+        assert(available() >= sz);
+        size_t blocks = sz >> 2u;
+        T a, b, c, d;
+        while (blocks--)
+        {
+          a = r.read();
+          b = r.read();
+          c = r.read();
+          d = r.read();
+          write(a);
+          write(b);
+          write(c);
+          write(d);
+        }
+        while (sz--)
+        {
+          write(r.read());
+        }
+        return writer(begin, available());
+      }
     };
   };
 
@@ -84,6 +111,12 @@ namespace vessl
   {
     w.write(v);
     return w;
+  }
+
+  template<typename T>
+  typename array<T>::writer& operator<<(typename array<T>::writer& w, const typename array<T>::reader& r)
+  {
+
   }
   
   template<typename T>

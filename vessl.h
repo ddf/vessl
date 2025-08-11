@@ -50,7 +50,41 @@ namespace vessl
     // ranged-based for support
     T* begin() { return data; }
     T* end() { return data + size; }
+
+    class reader
+    {
+      const T* begin;
+      const T* end;
+    public:
+      reader(T* data, size_t size) : begin(data), end(data + size) {}
+
+      size_t available() const { return end - begin; }
+      explicit operator bool() const { return begin != end; }
+
+      const T& peek() const { return *begin; }
+      const T& operator*() const { return *begin; }
+      
+      const T& read() { return *begin++; }
+    };
+
+    class writer
+    {
+      T* begin;
+      const T* end;
+    public:
+      writer(T* data, size_t size) : begin(data), end(data + size) {}
+
+      size_t available() const { return end - begin; }
+      void write(const T& v) { *begin++ = v; }
+    };
   };
+
+  template<typename T>
+  typename array<T>::writer& operator<<(typename array<T>::writer& w, const T& v)
+  {
+    w.write(v);
+    return w;
+  }
   
   template<typename T>
   class parameter

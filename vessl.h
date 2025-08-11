@@ -82,9 +82,8 @@ namespace vessl
 
       size_t available() const { return end - head; }
       void write(const T& v) { *head++ = v; }
-
-      template<typename R>
-      writer operator<<(R& r)
+      
+      writer operator<<(reader& r)
       {
         size_t sz = r.available();
         assert(available() >= sz);
@@ -120,19 +119,29 @@ namespace vessl
     {
     }
 
+    // expose direct access to underlying array data
+    using array<T>::getData;
+    using array<T>::getSize;
+
     size_t getWriteCapacity() const
     {
       return array<T>::writer::head > array<T>::reader::head
       ? array<T>::writer::available() + (array<T>::reader::head - array<T>::data)
       : array<T>::reader::head - array<T>::writer::head;
     }
+
+    size_t getWriteIndex() const
+    {
+      return array<T>::writer::head - array<T>::data;
+    }
     
     void write(const T& v)
     {
-      assert(getWriteCapacity() > 0);
+      size_t cap = getWriteCapacity();
+      assert(cap > 0);
       array<T>::writer::write(v);
       // reset the writer when we get to the end of our array
-      if (array<T>::writer::available() == 0)
+      if (cap == 1)
       {
         array<T>::writer::head = array<T>::data;
       }
@@ -160,13 +169,33 @@ namespace vessl
 
     const T& read()
     {
-      assert(getReadCapacity() > 0);
+      size_t cap = getReadCapacity();
+      assert(cap > 0);
       const T& result = array<T>::reader::read();
-      if (array<T>::reader::available() == 0)
+      if (cap == 1)
       {
         array<T>::reader::reset();
       }
       return result;
+    }
+
+    // generates fractional index that can be used to
+    // read from the beginning of the underlying array
+    // which is fromWriteHead samples behind the write head.
+    double getReadOffset(double fromWriteHead) const
+    {
+      double sz = getSize();
+      double idx = getWriteIndex();
+      // double i;
+      // double f = modf(fromWriteHead, &i);
+      // idx -= i;
+      // idx -= f;
+      idx -= fromWriteHead;
+      if (idx < 0)
+      {
+        idx += sz;
+      }
+      return idx;
     }
   };
   
@@ -243,7 +272,7 @@ namespace vessl
     processor& operator=(const processor&) = delete;
     processor& operator=(processor&&) = delete;
     
-    virtual void process(const T& in, T* out) = 0;
+    virtual T process(const T& in) = 0;
   };
 
   template<typename T, size_t N>
@@ -382,6 +411,14 @@ namespace vessl
 
   template<>
   inline float wrap01(float v) { float i; return modf(v, &i); }
+
+#ifndef clamp
+  template<typename T>
+  T clamp(T val, T low, T high)
+  {
+    return val < low ? low : val > high ? high : val;
+  }
+#endif
 
   // a waveform that can be evaluated using a phase value, which will be wrapped to the range [0,1)
   template<typename T>
@@ -901,80 +938,57 @@ namespace vessl
 //   private:
 //     io<T, 1, 1> io;
 //   };
-//
-//   template<typename T, std::size_t IO, std::size_t MAX_BUFFER_SIZE>
-//   class delay : unit<T>
-//   {
-//   public:
-//     delay(T timeInSeconds, T sampleRate)
-//       : audio(this)
-//       , ctrl(this)
-//     {
-//       time = timeInSeconds;
-//     }
-//
-//     /// input signal that will be delayed
-//     array<input>& in = audio.inputs();
-//     /// output signal
-//     array<output>& out = audio.outputs();
-//
-//     /// amount of delay time in seconds, will be clamped to MAX_BUFFER_SIZE based on current sample rate
-//     input& time = ctrl.in[0];
-//     /// amount of signal to feedback, can be negative to invert feedback signal, clamped [-1,1]
-//     input& feedback = ctrl.in[1];
-//     /// mix between dry and wet signal, clamped [0,1]
-//     input& mix = ctrl.in[2];
-//
-//     array<input>& inputs() override { return in; }
-//     array<output>& outputs() override { return out; }
-//
-//     void tick(T deltaTime) override
-//     {
-//       // delay time in samples, don't allow negative delay times because our buffer will fill up
-//       T dts = clamp<T>(ctrl.in[0] / deltaTime, 1, MAX_BUFFER_SIZE);
-//       T fbk = clamp<T>(ctrl.in[1], -1., 1.);
-//       T fade = clamp<T>(ctrl.in[2], 0., 1.);
-//       for (int i = 0; i < IO; ++i)
-//       {
-//         // audio input plus wet signal feedback from last tick
-//         T dry = audio.in[i] + ctrl.out[i] * fbk;
-//         if (buffer[i].capacity())
-//         {
-//           buffer[i].push(dry);
-//         }
-//
-//         T wet = 0;
-//
-//         // NOTE: this method seems to work ok for fixed delay times and slowly changing delay times,
-//         // but fast delay time changes generate gross artifacts,
-//         // which will require a resampling solution to deal with (ala VCV Rack's Delay),
-//         // meaning that this delay class is not entirely suitable for use in a flanger.
-//         //
-//         // how many samples do we need to pull out of the buffer to catch up with our delay time
-//         T read = buffer[i].size() - dts;
-//         if (read >= 0)
-//         {
-//           T s = buffer[i].front();
-//           while (read >= 1)
-//           {
-//             s = buffer[i].pop();
-//             read -= 1;
-//           }
-//
-//           wet = s + (buffer[i].front() - s)*(1 - read);
-//         }
-//
-//         ctrl.out[i] = wet;
-//
-//         audio.out[i] = dry + (wet - dry)*fade;
-//       }
-//     }
-//
-//   private:
-//     ringbuffer<T, MAX_BUFFER_SIZE> buffer[IO];
-//     io<T, IO, IO> audio;
-//     io<T, 3,  IO> ctrl; // outputs here hold the wet signal from the previous tick
-//   };
+
+   template<typename T, typename I = interpolation::linear<T>>
+   class delay : public unitProcessor<T>
+   {
+     uinit<T, 2> init = {
+       "delay", {{"time", 0}, {"feedback", 0}}
+     };
+     ring<T> buffer;
+     
+   public:
+     delay(array<T> buffer, float sampleRate, T delayInSeconds = 0, T feedbackAmount = 0) : unitProcessor<T>(init, sampleRate)
+     , buffer(buffer.getData(), buffer.getSize())
+     {
+       time() << delayInSeconds;
+       feedback() << feedbackAmount;
+     }
+
+     // @todo modulating time causes glitchy audio, need to figure out why, my indexing math might be off?
+     /// amount of delay time in seconds, will be clamped to MAX_BUFFER_SIZE based on current sample rate
+     parameter<T>& time() { return init.params[0]; }
+     /// amount of signal to feedback, can be negative to invert feedback signal, clamped [-1,1]
+     parameter<T>& feedback() { return init.params[1]; }
+
+     T process(const T& in) override
+     {
+       // delay time in samples, don't allow negative delay times because our buffer will fill up
+       float dts = clamp(*time() * unit<T>::getSampleRate(), 1, (float)buffer.getSize());
+       T fbk = clamp(*feedback(), -1., 1.);
+       double readIdx = buffer.getReadOffset(dts);
+       T s = sample<T, I>(buffer.getData(), readIdx);
+
+       buffer.write(in + s*fbk);
+       return s;
+     }
+
+     // allocate a delay that owns its buffer data
+     static delay* create(float sampleRate, float maxDelayInSeconds)
+     {
+       size_t bufferSize = maxDelayInSeconds*sampleRate + 1;
+       T* data = new T[bufferSize];
+       delay* d = new delay(array<T>(data, bufferSize), sampleRate, maxDelayInSeconds);
+       return d;
+     }
+
+     // destroy a delay created with create
+     static void destroy(const delay* delay)
+     {
+       delete[] delay->buffer.getData();
+       delete delay;
+     }
+   };
 }
 
 // need to break out the rotation matrix calculation into a separate class

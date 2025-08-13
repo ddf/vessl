@@ -149,53 +149,123 @@ namespace vessl
     }
   };
   
-  template<typename T>
   class parameter
   {
   public:
-    parameter() : n(""), v(0) {}
-    parameter(const char * name, T value) : n(name), v(value) {}
-    
-    const char* name() const { return n; }
+    enum class type : uint8_t
+    {
+        binary = 0, // on/off
+        digital = 1, // integral values
+        analog = 2, // floating point values
+        // space for more built-ins
+      
+        user = UINT8_MAX // user provided type, stored as a void*
+    };
+
+    parameter(const char * name, type type) : pn(name), pt(type)
+    {
+      switch (pt)
+      {
+        case type::binary: pv.b = false; break;
+        case type::digital: pv.i = 0; break;
+        case type::analog: pv.a = 0; break;
+        case type::user: pv.u = nullptr; break;
+          
+        default: assert(false && "attempted to initialize a parameter with an unknown type"); break;  // NOLINT(clang-diagnostic-covered-switch-default)
+      }
+    }
+    parameter(const char * name, bool value) : pn(name), pt(type::binary) { pv.b = value; }
+    parameter(const char * name, long value) : pn(name), pt(type::digital) { pv.i = value; }
+    parameter(const char * name, double value) : pn(name), pt(type::analog) { pv.a = value; }
+    parameter(const char * name, void* value) : pn(name), pt(type::user) { pv.u = value; } 
+
+    const char* getName() const { return pn; }
+    type getType() const { return pt; }
 
     // for the sane
-    T read() const { return v; }
-    parameter& write(T value) { v = value; return *this; }
+    template<typename T>
+    T read() const
+    {
+      // ReSharper disable once CppDefaultCaseNotHandledInSwitchStatement
+      switch (pt)
+      {
+        case type::binary: return static_cast<T>(pv.b);
+        case type::digital: return static_cast<T>(pv.i);
+        case type::analog: return static_cast<T>(pv.a);
+        case type::user: return pv.u ? *static_cast<T*>(pv.u) : T();
+      }
+      return T();
+    }
 
-    // just how much silly syntactic sugar can we add here, lol
-    const T& operator*() const { return v; }
-    operator T*() { return &v; }
-    
-    T operator!() const { return v == 0 ? T(1) : T(1) / v; }
-    T operator-() const { return -v; }
+    template<typename T>
+    parameter& write(const T& value)
+    {
+      // ReSharper disable once CppDefaultCaseNotHandledInSwitchStatement
+      switch (pt)
+      {
+        case type::binary: pv.b = static_cast<bool>(value); break;
+        case type::digital: pv.i = static_cast<long>(value); break;
+        case type::analog: pv.a = static_cast<double>(value); break;
+        case type::user: if (pv.u) *static_cast<T*>(pv.u) = value; break;
+      }
+      return *this;
+    }
+
+    // overloading dereference with float conversion because it will be used so often
+    float operator*() const { return read<float>(); }
+
+    template<typename T>
+    T operator!() const
+    {
+      // ReSharper disable once CppDefaultCaseNotHandledInSwitchStatement
+      switch (pt)
+      {
+        case type::binary: return !pv.b;
+        case type::digital: return !pv.i;
+        case type::analog: return !pv.a;
+        case type::user: return !(pv.u ? *pv.u : T());
+      }
+      return !T(); 
+    }
+
+    template<typename T>
+    T operator-() const
+    {
+      // ReSharper disable once CppDefaultCaseNotHandledInSwitchStatement
+      switch (pt)
+      {
+        case type::binary: return !pv.b;
+        case type::digital: return -pv.i;
+        case type::analog: return -pv.a;
+        case type::user: return -(pv.u ? *pv.u : T());
+      }
+      return -T(); 
+    }
 
   private:
-    const char* n;
-    T v;
+    const char* pn;
+    union
+    {
+      bool b;
+      long i;
+      double a;
+      void* u;
+    } pv;
+    type pt;
   };
 
-  template<>
-  inline float parameter<float>::operator!() const { return v > 0 && v < FLT_EPSILON ? 1.0f : 1.0f / v; }
-
-  template<>
-  inline double parameter<double>::operator!() const { return v > 0 && v < DBL_EPSILON ? 1.0 : 1.0 / v; }
-
-  template<>
-  inline long double parameter<long double>::operator!() const { return v > 0 && v < LDBL_EPSILON ? 1.0 : 1.0 / v; }
-
-  template<typename T>
-  parameter<T>& operator<<(parameter<T>& p, const T& v)
-  {
-    p.write(v);
-    return p;
-  }
-
-  template<typename T>
-  parameter<T>& operator>>(parameter<T>& p, T& v)
-  {
-    v = p.read();
-    return p;
-  }
+  template<typename T> parameter& operator<<(parameter& p, const T& v) { return p.write(v); }
+  template<typename T> T& operator>>(parameter& p, T& v) { v = p.read<T>(); return v; }
+  template<typename T> bool operator>(const parameter& p, const T& v) { return p.read<T>() > v; }
+  template<typename T> bool operator<(const parameter& p, const T& v) { return p.read<T>() < v; }
+  template<typename T> bool operator==(const parameter& p, const T& v) { return p.read<T>() == v; }
+  template<typename T> bool operator!=(const parameter& p, const T& v) { return p.read<T>() != v; }
+  template<typename T> T operator+(const parameter& p, const T& v) { return p.read<T>() + v; }
+  template<typename T> T operator+(const T& v, const parameter& p) { return p.read<T>() + v; }
+  template<typename T> T operator*(const parameter& p, const T& v) { return p.read<T>() * v; }
+  template<typename T> T operator*(const T& v, const parameter& p) { return p.read<T>() * v; }
+  template<typename T> T operator/(const parameter& p, const T& v) { return p.read<T>() / v; }
+  template<typename T> T operator/(const T& v, const parameter& p) { return v / p.read<T>(); }
 
   template<typename T>
   class generator
@@ -224,21 +294,22 @@ namespace vessl
     
     virtual T process(const T& in) = 0;
   };
-
-  template<typename T, size_t N>
-  struct uinit
-  {
-    const char* name;
-    parameter<T> params[N];
-  };
   
-  template<typename T>
-  class unit : array<parameter<T>>
+  class unit : array<parameter>
   {
-  public:
+  protected:
     template<size_t N>
-    explicit unit(uinit<T, N>& init, float sampleRate = 1) : array<parameter<T>>(init.params, N), n(init.name) { setSampleRate(sampleRate); }
-    unit(const char* name, parameter<T>* params, int paramsCount, float sampleRate = 1) : array<parameter<T>>(params, paramsCount), n(name) { setSampleRate(sampleRate); }
+    struct init
+    {
+      const char* name;
+      parameter params[N];
+    };
+    
+    template<size_t N>
+    explicit unit(init<N>& init, float sampleRate = 1) : array(init.params, N), n(init.name) { setSampleRate(sampleRate); }
+    unit(const char* name, parameter* params, int paramsCount, float sampleRate = 1) : array(params, paramsCount), n(name) { setSampleRate(sampleRate); }
+
+  public:
     virtual ~unit() = default;
     unit(const unit&) = default;
     unit(unit&&) = default;
@@ -256,12 +327,12 @@ namespace vessl
       onSampleRateChanged();
     }
 
-    parameter<T>& getParameter(size_t index) { return this->operator[](index); }
-    const parameter<T>& getParameter(size_t index) const { return this->operator[](index); }
-    size_t getParameterCount() const { return array<parameter<T>>::getSize(); }
+    parameter& getParameter(size_t index) { return this->operator[](index); }
+    const parameter& getParameter(size_t index) const { return this->operator[](index); }
+    size_t getParameterCount() const { return getSize(); }
 
-    using array<parameter<T>>::begin;
-    using array<parameter<T>>::end;
+    using array::begin;
+    using array::end;
 
   protected:
     virtual void onSampleRateChanged() {}
@@ -274,21 +345,21 @@ namespace vessl
   };
 
   template<typename T>
-  class unitGenerator : public unit<T>, public generator<T>
+  class unitGenerator : public unit, public generator<T>
   {
-  public:
+  protected:
     template<size_t N>
-    explicit unitGenerator(uinit<T, N>& init, float sampleRate = 1) : unit<T>(init, sampleRate), generator<T>() {}
-    unitGenerator(const char* name, parameter<T>* params, int paramsCount, float sampleRate = 1) : unit<T>(name, params, paramsCount, sampleRate), generator<T>() {}
+    explicit unitGenerator(init<N>& init, float sampleRate = 1) : unit(init, sampleRate), generator<T>() {}
+    unitGenerator(const char* name, parameter* params, int paramsCount, float sampleRate = 1) : unit(name, params, paramsCount, sampleRate), generator<T>() {}
   };
 
   template<typename T>
-  class unitProcessor : public unit<T>, public processor<T>
+  class unitProcessor : public unit, public processor<T>
   {
-  public:
+  protected:
     template<size_t N>
-    explicit unitProcessor(uinit<T, N>& init, float sampleRate = 1) : unit<T>(init, sampleRate), processor<T>() {}
-    unitProcessor(const char* name, parameter<T>* params, int paramsCount, float sampleRate = 1) : unit<T>(name, params, paramsCount, sampleRate), processor<T>() {}
+    explicit unitProcessor(init<N>& init, float sampleRate = 1) : unit(init, sampleRate), processor<T>() {}
+    unitProcessor(const char* name, parameter* params, int paramsCount, float sampleRate = 1) : unit(name, params, paramsCount, sampleRate), processor<T>() {}
   };
   
   namespace interpolation
@@ -328,7 +399,7 @@ namespace vessl
         double fm2 = f - 2.;
         double fp1 = f + 1;
         size_t x0 = static_cast<size_t>(idx);
-        return -f * fm1*fm2*DIV6 * buffer[x0 - 1] + fp1 * fm1*fm2*DIV2 * buffer[x0] - fp1 * f*fm2*DIV2 * buffer[x0 + 1] + fp1 * f*fm1*DIV6 * buffer[x0 + 2];
+        return -f * fm1*fm2*DIV6 * buffer[x0 - 1] + fp1 *fm1*fm2*DIV2 * buffer[x0] - fp1 * f*fm2*DIV2 * buffer[x0 + 1] + fp1 * f*fm1*DIV6 * buffer[x0 + 2];
       }
     };
   };
@@ -505,10 +576,9 @@ namespace vessl
     {
       return vessl::sample(buffer, fracIdx+1);
     }
-
-  protected:
+    
     // implement waveform
-    T eval(double phase) const override { return sample(phase*N); }
+    T evaluate(double phase) const override { return sample(phase*N); }
 
   private:
     T buffer[N + 3] = {};
@@ -516,11 +586,12 @@ namespace vessl
 
   // @todo easings namespace similar to interpolation namespace
   template<typename T>
-  T lerp(T v1, T v2, T a)
+  T lerp(T v1, T v2, double a)
   {
     return v1 + (v2 - v1)*a;
   }
-  
+
+  // @todo refactor this to work like interpolation?
   enum class noiseTint : uint8_t
   {
     white,
@@ -532,37 +603,38 @@ namespace vessl
   template<typename T>
   class noise final : public unitGenerator<T>
   {
-    uinit<T, 2> init = {
-      "noise", {{ "tint", 0 }, { "rate", 1 }}
+    unit::init<2> init = {
+      "noise", { parameter("tint", parameter::type::digital), parameter("rate", parameter::type::analog) }
     };
 
-    using unit<T>::dt;
+    using unit::dt;
     
   public:
     explicit noise(float sampleRate, noiseTint withTint = noiseTint::white)
     : unitGenerator<T>(init, sampleRate), step(0)
     {
       nz[0] = nz[1] = next(withTint, 0);
-      tint().write(static_cast<float>(withTint));
+      tint() << withTint;
+      rate() << 1.0;
     }
     noise(const noise&) = default;
     noise(noise&&) = default;
     noise& operator=(const noise&) = default;
     noise& operator=(noise&&) = default;
     ~noise() override = default;
+    
+    parameter& tint() { return init.params[0]; }
+    parameter& rate() { return init.params[1]; }
 
-    parameter<T>& tint() { return init.params[0]; }
-    parameter<T>& rate() { return init.params[1]; }
-
-    static T next(noiseTint tint, T dt);
-
+    static T next(noiseTint tint, double dt);
+    
     T generate() override
     {
       step += dt() * rate().read();
       float alpha = step / dt();
       if (alpha >= 1)
       {
-        noiseTint tnt = static_cast<noiseTint>(tint().read());
+        noiseTint tnt = static_cast<noiseTint>(tint());
         nz[0] = nz[1];
         nz[1] = next(tnt, dt());
         alpha = wrap01(alpha);
@@ -575,9 +647,10 @@ namespace vessl
     float step;
     T nz[2];
   };
-
+  
   template<typename T>
-  T noise<T>::next(noiseTint tint, T dt) {
+  T noise<T>::next(noiseTint tint, double dt)
+  {
     switch (tint)
     {
       case noiseTint::white:
@@ -639,14 +712,16 @@ namespace vessl
   template<typename T>
   class ramp final : public unitGenerator<T>
   {
-    uinit<T, 4> init {
-      "ramp", {{"begin", 0}, {"end", 0}, {"duration", 0}, {"eor", 0}}
+    T mFrom, mTo;
+    unit::init<4> init {
+      "ramp",
+      { parameter("from", &mFrom), parameter("to", &mTo), parameter("duration", parameter::type::analog), parameter("eor", parameter::type::binary)}
     };
 
-    using unit<T>::dt;
+    using unit::dt;
     
   public:
-    explicit ramp(float sampleRate, float durationInSeconds = 0, float fromValue = 0, float toValue = 0) : unitGenerator<T>(init, sampleRate)
+    explicit ramp(float sampleRate, float durationInSeconds = 0, T fromValue =T(0), T toValue = T(0)) : unitGenerator<T>(init, sampleRate)
     , t(0)
     {
       // this is fun
@@ -659,29 +734,29 @@ namespace vessl
     ramp& operator=(const ramp&) = default;
     ramp& operator=(ramp&&) = default;
     ~ramp() override = default;
-
+    
     // ins
-    parameter<T>& from() { return init.params[0]; }
-    parameter<T>& to() { return init.params[1]; }
-    parameter<T>& duration() { return init.params[2]; }
+    parameter& from() { return init.params[0]; }
+    parameter& to() { return init.params[1]; }
+    parameter& duration() { return init.params[2]; }
 
     // outs
-    const parameter<T>& eor() const { return init.params[3]; }
+    const parameter& eor() const { return init.params[3]; }
     // could also add t as an out.
       
-    bool isActive() const { return *eor() < 1; }
+    bool isActive() const { return !eor().template read<bool>(); }
   
     void trigger()
     {
-      if (*duration() > 0)
+      if (duration() > FLT_EPSILON)
       {
         t = 0;
-        eor_() << T(0);
+        eorw() << T(0);
       }
       else
       {
         t = 1;
-        eor_() << T(1);
+        eorw() << T(1);
       }
     }
   
@@ -690,17 +765,18 @@ namespace vessl
       float lt = t;
       if (isActive())
       {
-        t += dt() * !duration();
+        float dinv = 1.0f / duration();
+        t += dt() * dinv; 
         if (t >= 1)
         {
-          eor_() << T(1);
+          eorw() << T(1);
         }
       }
-      return lerp<T>(*from(), *to(), lt);
+      return lerp<T>(mFrom, mTo, lt);
     }
   
   private:
-    parameter<T>& eor_() { return init.params[3]; }
+    parameter& eorw() { return init.params[3]; }
     float t;
   };
   //
@@ -842,18 +918,21 @@ namespace vessl
   class oscil final : public unitGenerator<T>
   {
     W wave;
-    T phase;
-    T dt;
+    double phase;
+    using unit::dt;
 
-    uinit<T, 4> init = {
-      "oscil", {{ "frequency", 0 }, { "fm (lin)", 0 }, { "fm (v/oct)", 0 }, { "phase mod", 0 }}
+    unit::init<4> init = {
+      "oscil", {
+        parameter("frequency", parameter::type::analog), parameter("fm (lin)", parameter::type::analog),
+        parameter("fm (v/oct)", parameter::type::analog), parameter("phase mod", parameter::type::analog)
+      }
     };
     
   public:
-    explicit oscil(T sampleRate, T freqInHz = 440) : unitGenerator<T>(init)
-    , phase(0) , dt(1.0f/sampleRate)
+    explicit oscil(float sampleRate, double freqInHz = 440) : unitGenerator<T>(init, sampleRate)
+    , phase(0)
     {
-      fHz().write(freqInHz);
+      fHz() << freqInHz;
     }
     oscil(const oscil&) = default;
     oscil(oscil&&) = default;
@@ -865,18 +944,18 @@ namespace vessl
     const W& waveform() const { return wave; }
 
     // frequency in Hz without FM applied
-    parameter<T>& fHz() { return init.params[0]; }
+    parameter& fHz() { return init.params[0]; }
     // linear frequency modulation
-    parameter<T>& fmLin() { return init.params[1]; }
+    parameter& fmLin() { return init.params[1]; }
     // v/oct (exponential) frequency modulation
-    parameter<T>& fmExp() { return init.params[2]; }
+    parameter& fmExp() { return init.params[2]; }
     // phase modulation
-    parameter<T>& pm() { return init.params[3]; }
+    parameter& pm() { return init.params[3]; }
     
     T generate() override
     {
-      T val = wave.evaluate(phase + pm().read()); 
-      phase += (fHz().read()*exp2(fmExp().read()) + fmLin().read())*dt;
+      T val = wave.evaluate(phase + pm());
+      phase += (fHz() * exp2(*fmExp()) + fmLin())*dt();
       phase = wrap01(phase);
       return val;
     }
@@ -927,49 +1006,37 @@ namespace vessl
    template<typename T, typename I = interpolation::linear<T>>
    class delay : public unitProcessor<T>
    {
-     uinit<T, 2> init = {
-       "delay", {{"time", 0}, {"feedback", 0}}
+     float mTime;
+     unit::init<2> init = {
+       "delay", { parameter("time", parameter::type::analog), parameter("feedback", parameter::type::analog)}
      };
      delayline<T> buffer;
-     
+
+     using unit::dt;
+   
    public:
-     delay(array<T> buffer, float sampleRate, T delayInSeconds = 0, T feedbackAmount = 0) : unitProcessor<T>(init, sampleRate)
-     , buffer(buffer.getData(), buffer.getSize())
+     delay(array<T> buffer, float sampleRate, float delayInSeconds = 0, float feedbackAmount = 0) : unitProcessor<T>(init, sampleRate)
+     , mTime(delayInSeconds), buffer(buffer.getData(), buffer.getSize())
      {
        time() << delayInSeconds;
        feedback() << feedbackAmount;
      }
-
-     // @todo modulating time causes glitchy audio, need to figure out why, my indexing math might be off?
-     /// amount of delay time in seconds, will be clamped to MAX_BUFFER_SIZE based on current sample rate
-     parameter<T>& time() { return init.params[0]; }
+     
+     /// amount of delay time in seconds
+     parameter& time() { return init.params[0]; }
      /// amount of signal to feedback, can be negative to invert feedback signal, clamped [-1,1]
-     parameter<T>& feedback() { return init.params[1]; }
+     parameter& feedback() { return init.params[1]; }
 
      T process(const T& in) override
      {
+       // smooth time parameter to prevent crunchiness when it is noisy or changes by large amounts
+       mTime = lerp(mTime, *time(), dt()*10);
        // delay time in samples
-       float dts = clamp(*time() * unit<T>::getSampleRate(), 0, (float)buffer.getSize()-1);
-       T fbk = clamp(*feedback(), -1., 1.);
+       float dts = clamp(mTime * unit::getSampleRate(), 0, (float)buffer.getSize()-1);
+       float fbk = clamp(feedback() >> fbk, -1.f, 1.f);
        T s = buffer.template read<I>(dts);
        buffer.write(in + s*fbk);
        return s;
-     }
-
-     // allocate a delay that owns its buffer data
-     static delay* create(float sampleRate, float maxDelayInSeconds)
-     {
-       size_t bufferSize = maxDelayInSeconds*sampleRate + 1;
-       T* data = new T[bufferSize];
-       delay* d = new delay(array<T>(data, bufferSize), sampleRate, maxDelayInSeconds);
-       return d;
-     }
-
-     // destroy a delay created with create
-     static void destroy(const delay* delay)
-     {
-       delete[] delay->buffer.getData();
-       delete delay;
      }
    };
 }

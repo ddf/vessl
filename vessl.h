@@ -23,7 +23,16 @@
 ///////////////////////////////////////////////////////////////////////////////////
 
 #pragma once
+#include <cmath>
 #include <cassert>
+#include <cstring> // for memcpy
+
+// When built for ARM Cortex-M processor series,
+// we provide template specializations that use the optimized CMSIS library:
+// http://www.keil.com/pack/doc/CMSIS/General/html/index.html
+#ifdef ARM_CORTEX
+#include "arm_math.h" 
+#endif //ARM_CORTEX
 
 #ifndef PI
 #define PI 3.14159265358979323846
@@ -31,6 +40,11 @@
 
 namespace vessl
 {
+  // @todo might be nice to start with source and sink as interfaces that define read<T> and write<T>
+  // array::reader and array:writer would implement these
+  // but this also means that generator could implement source and processor could have a process method that takes a source and a sink
+  
+  // Note: T is assumed to be POD
   template<typename T>
   class array
   {
@@ -59,17 +73,18 @@ namespace vessl
       const T* head;
       const T* end;
     public:
+      explicit reader(array source) : begin(source.data), head(source.data), end(source.data + source.size) {}
       reader(T* data, size_t size) : begin(data), head(data), end(data + size) {}
 
       size_t available() const { return end - head; }
       explicit operator bool() const { return head != end; }
 
-      const T& peek() const { return *head; }
-      const T& operator*() const { return *head; }
+      T peek() const { return *head; }
+      const T* operator*() const { return head; }
       
-      const T& read() { return *head++; }
+      T read() { return *head++; }
 
-      reader& reset() { head = begin; return *this; }
+      reader reset() { head = begin; return *this; }
     };
 
     class writer
@@ -78,31 +93,82 @@ namespace vessl
       T* head;
       const T* end;
     public:
+      explicit writer(array source) : head(source.data), end(source.data + source.size) {}
       writer(T* data, size_t size) : head(data), end(data + size) {}
 
       size_t available() const { return end - head; }
       void write(const T& v) { *head++ = v; }
+      explicit operator bool() const { return head != end; }
       
-      writer operator<<(reader& r)
-      {
-        size_t sz = r.available();
-        assert(available() >= sz);
-        size_t blocks = sz >> 2u;
-        sz -= blocks*4;
-        T a, b, c, d;
-        while (blocks--)
-        {
-          a = r.read(); b = r.read(); c = r.read(); d = r.read();
-          write(a); write(b); write(c); write(d);
-        }
-        while (sz--)
-        {
-          write(r.read());
-        }
-        return writer(head, available());
-      }
+      writer operator<<(reader r);
     };
+
+    array operator<<(array copyFrom)
+    {
+      writer w(*this);
+      w << reader(copyFrom);
+      return *this;
+    }
+
+    // returns dest
+    array add(array other, array dest);
+    // returns this
+    array add(array other) { return add(other, *this); }
+    // returns dest
+    array scale(T value, array dest);
+    // returns this
+    array scale(T value) { return scale(value, *this); }
   };
+
+  template<typename T>
+  T* begin(array<T>& arr)
+  {
+    return arr.begin();
+  }
+
+  template<typename T>
+  T* end(array<T>& arr)
+  {
+    return arr.end();
+  }
+
+  template<typename T>
+  typename array<T>::writer array<T>::writer::operator<<(reader r) {
+    size_t rsz = r.available();
+    size_t wsz = available();
+    assert(wsz >= rsz);
+    const T* rh = *r;
+    memcpy(static_cast<void*>(head), static_cast<const void*>(rh), rsz*sizeof(T));
+    head += rsz;
+    return writer(head, wsz - rsz);
+  }
+  
+  template<typename T>
+  array<T> array<T>::add(array other, array dest)
+  {
+    assert(size == other.size && size <= dest.size);
+    reader a(data, size);
+    reader b(other.data, other.size);
+    writer c(dest.data, dest.size);
+    while (a)
+    {
+      c << a.read() + b.read();
+    }
+    return dest;
+  }
+  
+  template<typename T>
+  array<T> array<T>::scale(T value, array dest)
+  {
+    assert(size <= dest.size);
+    reader a(data, size);
+    writer b(dest.data, dest.size);
+    while (a)
+    {
+      b << a.read() * value;
+    }
+    return dest;
+  }
 
   template<typename T>
   typename array<T>::writer& operator<<(typename array<T>::writer& w, const T& v)
@@ -138,7 +204,7 @@ namespace vessl
       }
     }
 
-    ring& operator<<(typename array<T>::reader& r)
+    ring operator<<(typename array<T>::reader r)
     {
       assert(r.available() < getSize());
       while (r)
@@ -293,6 +359,14 @@ namespace vessl
     processor& operator=(processor&&) = delete;
     
     virtual T process(const T& in) = 0;
+
+    void process(typename array<T>::reader in, typename array<T>::writer out)
+    {
+      while (in && out)
+      {
+        out << process(in.read());
+      }
+    }
   };
   
   class unit : array<parameter>
@@ -1038,7 +1112,27 @@ namespace vessl
        buffer.write(in + s*fbk);
        return s;
      }
+
+     using processor<T>::process;
    };
+
+#ifdef ARM_CORTEX
+  template<>
+  array<float> array<float>::add(array other, array dest)
+  {
+    assert(size == other.size && size <= dest.size);
+    arm_add_f32(data, other.data, dest.data, size);
+    return dest;
+  }
+
+  template<>
+  array<float> array<float>::scale(float value, array dest)
+  {
+    assert(size <= dest.size);
+    arm_scale_f32(data, value, dest.data, size);
+    return dest;
+  }
+#endif
 }
 
 // need to break out the rotation matrix calculation into a separate class

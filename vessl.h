@@ -22,8 +22,10 @@
 //
 ///////////////////////////////////////////////////////////////////////////////////
 
+// ReSharper disable CppClangTidyPortabilityTemplateVirtualMemberFunction
 #pragma once
 #include <cmath>
+#include <cfloat>
 #include <cassert>
 #include <cstring> // for memcpy
 
@@ -38,13 +40,77 @@
 #define PI 3.14159265358979323846
 #endif
 
+// Note: In all classes using typename T, it is assumed to be POD and to have support for all arithmetical operators
 namespace vessl
 {
-  // @todo might be nice to start with source and sink as interfaces that define read<T> and write<T>
-  // array::reader and array:writer would implement these
-  // but this also means that generator could implement source and processor could have a process method that takes a source and a sink
+  template<typename T>
+  class source
+  {
+  public:
+    source() = default;
+    virtual ~source() = default;
+    source(const source&) = delete;
+    source(const source&&) = delete;
+    source& operator=(const source&) = delete;
+    source& operator=(source&&) = delete;
+    
+    virtual bool isEmpty() const = 0;
+    virtual T read() = 0;
+
+    explicit operator bool() const { return !isEmpty(); }
+  };
+
+  template<typename T>
+  class sink
+  {
+  public:
+    sink() = default;
+    virtual ~sink() = default;
+    sink(const sink&) = delete;
+    sink(const sink&&) = delete;
+    sink& operator=(const sink&) = delete;
+    sink& operator=(sink&&) = delete;
+    
+    virtual bool isFull() const = 0;
+    virtual void write(const T& value) = 0;
+
+    explicit operator bool() const { return !isFull(); }
+  };
+
+  template<typename T>
+class generator : public source<T>
+  {
+  public:
+    generator() = default;
+    virtual T generate() = 0;
+    
+    // by default, we assume an endless source of data
+    bool isEmpty() const override { return false; }
+    T read() override { return generate(); }
+  };
+
+  template<typename T>
+  class processor
+  {
+  public:
+    processor() = default;
+    virtual ~processor() = default;
+    processor(const processor&) = delete;
+    processor(const processor&&) = delete;
+    processor& operator=(const processor&) = delete;
+    processor& operator=(processor&&) = delete;
+    
+    virtual T process(const T& in) = 0;  // NOLINT(portability-template-virtual-member-function)
+    
+    void process(source<T>& in, sink<T>& out)
+    {
+      while (in && out)
+      {
+        out.write(process(in.read()));
+      }
+    }
+  };
   
-  // Note: T is assumed to be POD
   template<typename T>
   class array
   {
@@ -66,41 +132,45 @@ namespace vessl
     T* begin() { return data; }
     T* end() { return data + size; }
 
-    class reader
+    class reader : public source<T>
     {
     protected:
       const T* begin;
       const T* head;
       const T* end;
     public:
-      explicit reader(array source) : begin(source.data), head(source.data), end(source.data + source.size) {}
-      reader(T* data, size_t size) : begin(data), head(data), end(data + size) {}
+      explicit reader(array source) : source<T>(), begin(source.data), head(source.data), end(source.data + source.size) {}
+      reader(T* data, size_t size) : source<T>(), begin(data), head(data), end(data + size) {}
 
+      // source methods
+      bool isEmpty() const override { return head == end; }
+      T read() override { return *head++; }
+      
       size_t available() const { return end - head; }
-      explicit operator bool() const { return head != end; }
 
       T peek() const { return *head; }
       const T* operator*() const { return head; }
-      
-      T read() { return *head++; }
 
       reader reset() { head = begin; return *this; }
     };
 
-    class writer
+    class writer : public sink<T>
     {
     protected:
       T* head;
       const T* end;
     public:
-      explicit writer(array source) : head(source.data), end(source.data + source.size) {}
-      writer(T* data, size_t size) : head(data), end(data + size) {}
+      explicit writer(array source) : sink<T>(), head(source.data), end(source.data + source.size) {}
+      writer(T* data, size_t size) : sink<T>(), head(data), end(data + size) {}
+
+      bool isFull() const override { return head == end; }
+      void write(const T& v) override { *head++ = v; }
 
       size_t available() const { return end - head; }
-      void write(const T& v) { *head++ = v; }
-      explicit operator bool() const { return head != end; }
-      
-      writer operator<<(reader r);
+
+      // block copy the entire contents of reader into this writer, returns this.
+      // writer must have enough space for the contents of reader.
+      writer operator<<(const reader& r);
     };
 
     array operator<<(array copyFrom)
@@ -133,7 +203,7 @@ namespace vessl
   }
 
   template<typename T>
-  typename array<T>::writer array<T>::writer::operator<<(reader r) {
+  typename array<T>::writer array<T>::writer::operator<<(const reader& r) {
     size_t rsz = r.available();
     size_t wsz = available();
     assert(wsz >= rsz);
@@ -332,42 +402,6 @@ namespace vessl
   template<typename T> T operator*(const T& v, const parameter& p) { return p.read<T>() * v; }
   template<typename T> T operator/(const parameter& p, const T& v) { return p.read<T>() / v; }
   template<typename T> T operator/(const T& v, const parameter& p) { return v / p.read<T>(); }
-
-  template<typename T>
-  class generator
-  {
-  public:
-    generator() = default;
-    virtual ~generator() = default;
-    generator(const generator&) = delete;
-    generator(const generator&&) = delete;
-    generator& operator=(const generator&) = delete;
-    generator& operator=(generator&&) = delete;
-    
-    virtual T generate() = 0;  // NOLINT(portability-template-virtual-member-function)
-  };
-
-  template<typename T>
-  class processor
-  {
-  public:
-    processor() = default;
-    virtual ~processor() = default;
-    processor(const processor&) = delete;
-    processor(const processor&&) = delete;
-    processor& operator=(const processor&) = delete;
-    processor& operator=(processor&&) = delete;
-    
-    virtual T process(const T& in) = 0;
-
-    void process(typename array<T>::reader in, typename array<T>::writer out)
-    {
-      while (in && out)
-      {
-        out << process(in.read());
-      }
-    }
-  };
   
   class unit : array<parameter>
   {
@@ -443,17 +477,17 @@ namespace vessl
     {
       T operator()(const T* buffer, double fracIdx)
       {
-        return buffer[static_cast<size_t>(roundf(fracIdx))];
+        return buffer[static_cast<size_t>(round(fracIdx))];
       }
     };
 
     template<typename T>
     struct linear
     {
-      T operator()(const T* buffer, double fracIdx)
+      T operator()(const T* buffer, float fracIdx)
       {
-        T idx;
-        T frac = modf(fracIdx, &idx);
+        float idx;
+        float frac = modf(fracIdx, &idx);
         size_t x0 = static_cast<size_t>(idx);
         return buffer[x0] + (buffer[x0 + 1] - buffer[x0])*frac;
       }
@@ -462,24 +496,24 @@ namespace vessl
     template<typename T>
     struct cubic
     {
-      T operator()(const T* buffer, double fracIdx)
+      T operator()(const T* buffer, float fracIdx)
       {
         static const T DIV6 = static_cast<T>(1. / 6.);
         static const T DIV2 = static_cast<T>(0.5);
 
-        double idx;
-        double f = modf(fracIdx, &idx);
-        double fm1 = f - 1.;
-        double fm2 = f - 2.;
-        double fp1 = f + 1;
-        size_t x0 = static_cast<size_t>(idx);
+        float idx;
+        float f = modf(fracIdx, &idx);
+        float fm1 = f - 1.f;
+        float fm2 = f - 2.f;
+        float fp1 = f + 1.f;
+        size_t x0 = idx;
         return -f * fm1*fm2*DIV6 * buffer[x0 - 1] + fp1 *fm1*fm2*DIV2 * buffer[x0] - fp1 * f*fm2*DIV2 * buffer[x0 + 1] + fp1 * f*fm1*DIV6 * buffer[x0 + 2];
       }
     };
   };
   
   template<typename T, typename I = interpolation::linear<T>>
-  T sample(const T* buffer, double fracIdx)
+  T sample(const T* buffer, float fracIdx)
   {
     assert(fracIdx >= 0 && "fracIdx argument to sample must be non-negative!");
     static I interpolator;
@@ -527,7 +561,7 @@ namespace vessl
     waveform& operator=(const waveform&) = delete;
     waveform& operator=(waveform&&) = delete;
     
-    virtual T evaluate(double phase) const = 0;  // NOLINT(portability-template-virtual-member-function)
+    virtual T evaluate(float phase) const = 0;  // NOLINT(portability-template-virtual-member-function)
   };
   
   namespace waves
@@ -537,11 +571,11 @@ namespace vessl
     {
     public:
       sine() = default;
-      T evaluate(double phase) const override { return sin(2*PI*phase); }
+      T evaluate(float phase) const override { return sin(2*PI*phase); }
     };
     
     template<>
-    inline float sine<float>::evaluate(double phase) const { return sinf(static_cast<float>(2 * PI * phase)); }
+    inline float sine<float>::evaluate(float phase) const { return sin(static_cast<float>(2 * PI * phase)); }
   }
 
   template<typename T>
@@ -565,12 +599,12 @@ namespace vessl
 
     // reads behind the write head with a fractional sampleDelay and given interpolation
     template<typename I = interpolation::linear<T>>
-    T read(double sampleDelay) const
+    T read(float sampleDelay) const
     {
-      assert(sampleDelay >= 0 && sampleDelay < getSize() - 1);
-      sampleDelay = getWriteIndex() + 1 + sampleDelay;
-      double idx;
-      double f = modf(sampleDelay, &idx);
+      assert(sampleDelay >= 0 && sampleDelay < static_cast<float>(getSize() - 1));
+      sampleDelay = static_cast<float>(getWriteIndex() + 1) + sampleDelay;
+      float idx;
+      float f = modf(sampleDelay, &idx);
       size_t x0 = static_cast<size_t>(idx) % getSize();
       size_t x1 = (x0 + 1) % getSize();
       size_t x2 = (x0 + 2) % getSize();
@@ -580,7 +614,7 @@ namespace vessl
     }
 
     // @todo samples the delayline like a waveform, where a phase of 0 is the oldest sample written and 1 is the newest
-    T evaluate(double phase) const override { return 0; }
+    T evaluate(float phase) const override { return 0; }
   };
   
   // a fixed-sized buffer that supports safely sampling it with a fractional index in the range [0, N-1],
@@ -646,13 +680,13 @@ namespace vessl
       }
     }
 
-    T sample(double fracIdx) const
+    T sample(float fracIdx) const
     {
       return vessl::sample(buffer, fracIdx+1);
     }
     
     // implement waveform
-    T evaluate(double phase) const override { return sample(phase*N); }
+    T evaluate(float phase) const override { return sample(phase*N); }
 
   private:
     T buffer[N + 3] = {};
@@ -660,7 +694,7 @@ namespace vessl
 
   // @todo easings namespace similar to interpolation namespace
   template<typename T>
-  T lerp(T v1, T v2, double a)
+  T lerp(T v1, T v2, float a)
   {
     return v1 + (v2 - v1)*a;
   }
@@ -992,7 +1026,7 @@ namespace vessl
   class oscil final : public unitGenerator<T>
   {
     W wave;
-    double phase;
+    float phase;
     using unit::dt;
 
     unit::init<4> init = {
@@ -1138,7 +1172,7 @@ namespace vessl
 // need to break out the rotation matrix calculation into a separate class
 // to allow for easier template specialization.
 // but, since rotation matrices beyond 3x3 start to get real math-y,
-// i'm not even sure this is something that should be included in this class.
+// I'm not even sure this is something that should be included in this class.
 // it might make more sense to have a separate class that is specifically about
 // positioning inputs in 2d or 3d "space" parametrically,
 // at let this class be a generic tool for routing inputs to outputs with scaling.

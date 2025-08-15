@@ -267,10 +267,10 @@ class generator : public source<T>
     
     void write(const T& v)
     {
-      *head-- = v;
-      if (head == array<T>::begin() - 1)
+      *head++ = v;
+      if (head == array<T>::end())
       {
-        head = array<T>::end() - 1;
+        head = array<T>::begin();
       }
     }
 
@@ -601,7 +601,9 @@ class generator : public source<T>
     template<typename I = interpolation::linear<T>>
     T read(float sampleDelay) const
     {
-      assert(sampleDelay >= 0 && sampleDelay < static_cast<float>(getSize() - 1));
+      float fSize = static_cast<float>(getSize());
+      sampleDelay = fSize - sampleDelay;
+      assert(sampleDelay >= 0 && sampleDelay < fSize - 1);
       sampleDelay = static_cast<float>(getWriteIndex() + 1) + sampleDelay;
       float idx;
       float f = modf(sampleDelay, &idx);
@@ -612,9 +614,8 @@ class generator : public source<T>
       T s[3] = { data[x0], data[x1], data[x2] };
       return sample<T, I>(s, f);
     }
-
-    // @todo samples the delayline like a waveform, where a phase of 0 is the oldest sample written and 1 is the newest
-    T evaluate(float phase) const override { return 0; }
+    
+    T evaluate(float phase) const override { float sampleDelay = (static_cast<float>(getSize())-1)*(1.f - phase); return read(sampleDelay); }
   };
   
   // a fixed-sized buffer that supports safely sampling it with a fractional index in the range [0, N-1],
@@ -622,14 +623,16 @@ class generator : public source<T>
   template<typename T, size_t N, typename I = interpolation::linear<T>>
   class wavetable final : public waveform<T>
   {
+    T buffer[N + 3] = {};
   public:
     wavetable(): waveform<T>() {}
 
-    wavetable(const T(&values)[N]): waveform<T>()
+    // assumes source can provide at least N samples
+    explicit wavetable(source<T>& source): waveform<T>()
     {
       for (int i = 0; i < N; ++i)
       {
-        buffer[i + 1] = values[i];
+        buffer[i + 1] = source.read();
       }
 
       // configure extra values on the ends of the buffer
@@ -639,13 +642,13 @@ class generator : public source<T>
       buffer[N + 2] = buffer[2];
     }
 
-    wavetable(const waveform<T>& generator): waveform<T>()
+    explicit wavetable(const waveform<T>& waveform): waveform<T>()
     {
-      double phase = 0;
-      double step = T(1) / N;
-      for (int i = 0; i < N; ++i)
+      float phase = 0;
+      float step = 1.0f / N;
+      for (size_t i = 0; i < N; ++i)
       {
-        buffer[i + 1] = generator(phase);
+        buffer[i + 1] = waveform.evaluate(phase);
         phase += step;
       }
 
@@ -682,14 +685,11 @@ class generator : public source<T>
 
     T sample(float fracIdx) const
     {
-      return vessl::sample(buffer, fracIdx+1);
+      return vessl::sample<T, I>(buffer, fracIdx+1);
     }
     
     // implement waveform
     T evaluate(float phase) const override { return sample(phase*N); }
-
-  private:
-    T buffer[N + 3] = {};
   };
 
   // @todo easings namespace similar to interpolation namespace
@@ -1022,34 +1022,32 @@ class generator : public source<T>
   //   io<T, I, 1> io;
   // };
 
-  template<typename T, typename W>
+  template<typename T>
   class oscil final : public unitGenerator<T>
   {
-    W wave;
-    float phase;
-    using unit::dt;
-
     unit::init<4> init = {
       "oscil", {
         parameter("frequency", parameter::type::analog), parameter("fm (lin)", parameter::type::analog),
         parameter("fm (v/oct)", parameter::type::analog), parameter("phase mod", parameter::type::analog)
       }
     };
+
+    waveform<T>* wave;
+    float phase;
+    
+    using unit::dt;
     
   public:
-    explicit oscil(float sampleRate, double freqInHz = 440) : unitGenerator<T>(init, sampleRate)
-    , phase(0)
+    explicit oscil(float sampleRate, waveform<T>& wave, double freqInHz = 440) : unitGenerator<T>(init, sampleRate)
+    , wave(&wave), phase(0) 
     {
       fHz() << freqInHz;
     }
+    ~oscil() override = default;
     oscil(const oscil&) = default;
     oscil(oscil&&) = default;
     oscil& operator=(const oscil&) = default;
     oscil& operator=(oscil&&) = default;
-    ~oscil() override = default;
-
-    W& waveform() { return wave; }
-    const W& waveform() const { return wave; }
 
     // frequency in Hz without FM applied
     parameter& fHz() { return init.params[0]; }
@@ -1062,7 +1060,7 @@ class generator : public source<T>
     
     T generate() override
     {
-      T val = wave.evaluate(phase + pm());
+      T val = wave->evaluate(phase + pm());
       phase += (fHz() * exp2(*fmExp()) + fmLin())*dt();
       phase = wrap01(phase);
       return val;

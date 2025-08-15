@@ -550,6 +550,7 @@ class generator : public source<T>
 #endif
 
   // a waveform that can be evaluated using a normalized phase value
+  // implementors should accept negative phase, as well as phase values outside [-1,1]
   template<typename T>
   class waveform
   {
@@ -577,49 +578,9 @@ class generator : public source<T>
     template<>
     inline float sine<float>::evaluate(float phase) const { return sin(static_cast<float>(2 * PI * phase)); }
   }
-
-  template<typename T>
-  class delayline final : public ring<T>, waveform<T>
-  {
-  public:
-    delayline(T* inData, size_t inSize) : ring<T>(inData, inSize) {}
-
-    using ring<T>::getData;
-    using ring<T>::getSize;
-    using ring<T>::getWriteIndex;
-    
-    // reads behind the write head with sampleDelay (i.e. the ith sample previously written)
-    // where a delay of 0 samples will give the most recently written value.
-    T read(size_t sampleDelay)
-    {
-      assert(sampleDelay < getSize()-1);
-      size_t idx = getWriteIndex() + 1 + sampleDelay;
-      return getData[idx%getSize()];
-    }
-
-    // reads behind the write head with a fractional sampleDelay and given interpolation
-    template<typename I = interpolation::linear<T>>
-    T read(float sampleDelay) const
-    {
-      float fSize = static_cast<float>(getSize());
-      sampleDelay = fSize - sampleDelay;
-      assert(sampleDelay >= 0 && sampleDelay < fSize - 1);
-      sampleDelay = static_cast<float>(getWriteIndex() + 1) + sampleDelay;
-      float idx;
-      float f = modf(sampleDelay, &idx);
-      size_t x0 = static_cast<size_t>(idx) % getSize();
-      size_t x1 = (x0 + 1) % getSize();
-      size_t x2 = (x0 + 2) % getSize();
-      const T* data = getData();
-      T s[3] = { data[x0], data[x1], data[x2] };
-      return sample<T, I>(s, f);
-    }
-    
-    T evaluate(float phase) const override { float sampleDelay = (static_cast<float>(getSize())-1)*(1.f - phase); return read(sampleDelay); }
-  };
   
-  // a fixed-sized buffer that supports safely sampling it with a fractional index in the range [0, N-1],
-  // or with a normalized position (i.e. phase) in the range [0,1] where 0 will return buffer[0] and 1 will return buffer[N-1].
+  // a fixed-sized buffer that supports sampling it a normalized phase.
+  // both positive and negative phases are supported
   template<typename T, size_t N, typename I = interpolation::linear<T>>
   class wavetable final : public waveform<T>
   {
@@ -682,14 +643,62 @@ class generator : public source<T>
         default: break;
       }
     }
-
-    T sample(float fracIdx) const
+    
+    // implement waveform:
+    T evaluate(float phase) const override
     {
-      return vessl::sample<T, I>(buffer, fracIdx+1);
+      float idx = phase*N;
+      while (idx > N) idx -= N;
+      while (idx < 0) idx += N;
+      return sample<T, I>(buffer, idx);
+    }
+  };
+
+  template<typename T>
+  class delayline final : public ring<T>, waveform<T>
+  {
+  public:
+    delayline(T* inData, size_t inSize) : ring<T>(inData, inSize) {}
+
+    using ring<T>::getData;
+    using ring<T>::getSize;
+    using ring<T>::getWriteIndex;
+    
+    // reads behind the write head with sampleDelay (i.e. the ith sample previously written)
+    // where a delay of 0 samples will give the most recently written value.
+    T read(size_t sampleDelay)
+    {
+      assert(sampleDelay < getSize()-1);
+      size_t idx = getWriteIndex() + 1 + sampleDelay;
+      return getData[idx%getSize()];
+    }
+
+    // reads behind the write head with a fractional sampleDelay and given interpolation
+    template<typename I = interpolation::linear<T>>
+    T read(float sampleDelay) const
+    {
+      float fSize = static_cast<float>(getSize());
+      sampleDelay = fSize - sampleDelay;
+      assert(sampleDelay >= 0 && sampleDelay < fSize - 1);
+      sampleDelay = static_cast<float>(getWriteIndex() + 1) + sampleDelay;
+      float idx;
+      float f = modf(sampleDelay, &idx);
+      size_t x0 = static_cast<size_t>(idx) % getSize();
+      size_t x1 = (x0 + 1) % getSize();
+      size_t x2 = (x0 + 2) % getSize();
+      const T* data = getData();
+      T s[3] = { data[x0], data[x1], data[x2] };
+      return sample<T, I>(s, f);
     }
     
-    // implement waveform
-    T evaluate(float phase) const override { return sample(phase*N); }
+    // phase will be wrapped to [-1,1] where 0 is the oldest sample recorded
+    T evaluate(float phase) const override
+    {
+      float fSize = static_cast<float>(getSize());
+      phase = wrap(phase, -1.f, 1.f);
+      float sampleDelay = phase > 0 ? (1.0f - phase)*fSize : -phase*fSize;
+      return read(sampleDelay);
+    }
   };
 
   // @todo easings namespace similar to interpolation namespace

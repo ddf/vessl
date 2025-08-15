@@ -655,7 +655,7 @@ class generator : public source<T>
   };
 
   template<typename T>
-  class delayline final : public ring<T>, waveform<T>
+  class delayline final : public ring<T>, public waveform<T>
   {
   public:
     delayline(T* inData, size_t inSize) : ring<T>(inData, inSize) {}

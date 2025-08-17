@@ -718,7 +718,7 @@ class generator : public source<T>
   };
   
   template<typename T>
-  class noise final : public unitGenerator<T>
+  class noiseGenerator final : public unitGenerator<T>
   {
     unit::init<2> init = {
       "noise", { parameter("tint", parameter::type::digital), parameter("rate", parameter::type::analog) }
@@ -727,18 +727,18 @@ class generator : public source<T>
     using unit::dt;
     
   public:
-    explicit noise(float sampleRate, noiseTint withTint = noiseTint::white)
+    explicit noiseGenerator(float sampleRate, noiseTint withTint = noiseTint::white)
     : unitGenerator<T>(init, sampleRate), step(0)
     {
       nz[0] = nz[1] = next(withTint, 0);
       tint() << withTint;
       rate() << 1.0;
     }
-    noise(const noise&) = default;
-    noise(noise&&) = default;
-    noise& operator=(const noise&) = default;
-    noise& operator=(noise&&) = default;
-    ~noise() override = default;
+    noiseGenerator(const noiseGenerator&) = default;
+    noiseGenerator(noiseGenerator&&) = default;
+    noiseGenerator& operator=(const noiseGenerator&) = default;
+    noiseGenerator& operator=(noiseGenerator&&) = default;
+    ~noiseGenerator() override = default;
     
     parameter& tint() { return init.params[0]; }
     parameter& rate() { return init.params[1]; }
@@ -766,7 +766,7 @@ class generator : public source<T>
   };
   
   template<typename T>
-  T noise<T>::next(noiseTint tint, double dt)
+  T noiseGenerator<T>::next(noiseTint tint, double dt)
   {
     switch (tint)
     {

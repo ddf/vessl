@@ -384,38 +384,37 @@ namespace vessl
     return interpolator(buffer, fracIdx);
   }
 
-  template<typename T>
-  T wrap(T val, T low, T high)
+  namespace math
   {
-    T diff = high - low;
-    while (val < low)
+    template<typename T>
+    T max(T a, T b) { return a > b ? a : b; }
+    
+    template<typename T>
+    T wrap(T val, T low, T high)
     {
-      val += diff;
+      T diff = high - low;
+      while (val < low)
+      {
+        val += diff;
+      }
+      while (val > high)
+      {
+        val -= diff;
+      }
+      return val;
     }
-    while (val > high)
-    {
-      val -= diff;
-    }
-    return val;
-  }
 
-  template<typename T>
-  T wrap01(T val) { return wrap(val, T(0), T(1)); }
-
-  template<>
-  inline float wrap01(float v)
-  {
-    float i;
-    return modf(v, &i);
-  }
+    template<typename T>
+    T wrap01(T val) { return wrap(val, T(0), T(1)); }
 
 #ifndef clamp
-  template<typename T>
-  T clamp(T val, T low, T high)
-  {
-    return val < low ? low : val > high ? high : val;
-  }
+    template<typename T>
+    T clamp(T val, T low, T high)
+    {
+      return val < low ? low : val > high ? high : val;
+    }
 #endif
+  }
 
   // a waveform that can be evaluated using a normalized phase value
   // implementors should accept negative phase, as well as phase values outside [-1,1]
@@ -846,7 +845,7 @@ namespace vessl
   {
     float idx;
     float frac = modf(fracIdx, &idx);
-    size_t x0 = idx;
+    size_t x0 = static_cast<size_t>(idx);
     return buffer[x0] + (buffer[x0 + 1] - buffer[x0]) * frac;
   }
 
@@ -992,7 +991,7 @@ namespace vessl
       noiseTint tnt = static_cast<noiseTint>(tint());
       nz[0] = nz[1];
       nz[1] = next(tnt, dt());
-      alpha = wrap01(alpha);
+      alpha = math::wrap01(alpha);
       step = alpha * dt();
     }
     return lerp(nz[0], nz[1], alpha);
@@ -1034,7 +1033,7 @@ namespace vessl
   {
     T val = wave->evaluate(phase + pm());
     phase += (fHz() * exp2(*fmExp()) + fmLin()) * dt();
-    phase = wrap01(phase);
+    phase = math::wrap01(phase);
     return val;
   }
 
@@ -1068,7 +1067,7 @@ namespace vessl
   T delayline<T>::evaluate(float phase) const
   {
     float fSize = static_cast<float>(getSize());
-    phase = wrap(phase, -1.f, 1.f);
+    phase = math::wrap(phase, -1.f, 1.f);
     float sampleDelay = phase > 0 ? (1.0f - phase) * fSize : -phase * fSize;
     return read(sampleDelay);
   }
@@ -1084,6 +1083,13 @@ namespace vessl
     T s = buffer.template read<I>(dts);
     buffer.write(in + s * fbk);
     return s;
+  }
+
+  template<>
+  inline float math::wrap01(float v)
+  {
+    float i;
+    return modf(v, &i);
   }
 
 #ifdef ARM_CORTEX

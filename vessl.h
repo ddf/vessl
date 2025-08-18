@@ -825,7 +825,7 @@ namespace vessl
   {
     switch (pt)
     {
-      case type::binary: pv.b = false; break;
+      case type::binary: pv.b = 0; break;
       case type::digital: pv.i = 0; break;
       case type::analog: pv.a = 0; break;
       case type::user: pv.u = nullptr; break;
@@ -843,7 +843,7 @@ namespace vessl
 
   inline parameter& parameter::write(bool gate, uint32_t sampleDelay)
   {
-    pv.b = gate & sampleDelay << 1;
+    pv.b = gate | sampleDelay << 1;
     return *this;
   }
 
@@ -857,10 +857,10 @@ namespace vessl
       {
         // if we were set with a sample delay, decrement the sample delay
         // and report the opposite value of our first bit
-        bool state = pv.b & 1;
+        size_t state = pv.b & 1;
         uint32_t sampleDelay = static_cast<uint32_t>(pv.b >> 1);
         if (sampleDelay == 0) { return static_cast<T>(state); }
-        const_cast<parameter*>(this)->pv.b = state & (sampleDelay - 1) << 1;
+        const_cast<parameter*>(this)->pv.b = state | ((sampleDelay - 1) << 1);
         return static_cast<T>(!state);
       }
       case type::digital: return static_cast<T>(pv.i);
@@ -890,7 +890,7 @@ namespace vessl
     // ReSharper disable once CppDefaultCaseNotHandledInSwitchStatement
     switch (pt)
     {
-      case type::binary: return !pv.b;
+      case type::binary: return !read<bool>();
       case type::digital: return !pv.i;
       case type::analog: return !pv.a;
       case type::user: return !(pv.u ? *pv.u : T());
@@ -904,7 +904,7 @@ namespace vessl
     // ReSharper disable once CppDefaultCaseNotHandledInSwitchStatement
     switch (pt)
     {
-      case type::binary: return !pv.b;
+      case type::binary: return !read<bool>();
       case type::digital: return -pv.i;
       case type::analog: return -pv.a;
       case type::user: return -(pv.u ? *pv.u : T());

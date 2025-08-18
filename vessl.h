@@ -90,22 +90,6 @@ namespace vessl
   };
 
   template<typename T>
-  class processor
-  {
-  public:
-    processor() = default;
-    virtual ~processor() = default;
-    processor(const processor&) = delete;
-    processor(const processor&&) = delete;
-    processor& operator=(const processor&) = delete;
-    processor& operator=(processor&&) = delete;
-
-    virtual T process(const T& in) = 0;
-
-    void process(source<T>& in, sink<T>& out);
-  };
-
-  template<typename T>
   class array
   {
   protected:
@@ -170,6 +154,9 @@ namespace vessl
       writer operator<<(const reader& r);
     };
 
+    reader getReader() const { return reader(*this); }
+    writer getWriter() { return writer(*this); }
+
     array operator<<(array copyFrom);
 
     // returns dest
@@ -187,6 +174,22 @@ namespace vessl
 
   template<typename T>
   T* end(array<T>& arr) { return arr.end(); }
+
+  template<typename T>
+  class processor
+  {
+  public:
+    processor() = default;
+    virtual ~processor() = default;
+    processor(const processor&) = delete;
+    processor(const processor&&) = delete;
+    processor& operator=(const processor&) = delete;
+    processor& operator=(processor&&) = delete;
+
+    virtual T process(const T& in) = 0;
+    virtual void process(source<T>& in, sink<T>& out);
+    virtual void process(array<T> in, array<T> out);
+  };
 
   template<typename T>
   class ring : array<T>
@@ -228,12 +231,18 @@ namespace vessl
     const char* getName() const { return pn; }
     type getType() const { return pt; }
 
-    // for the sane
+    // for the sane, static cast from our stored type to T
     template<typename T>
     T read() const;
 
+    // read the state of a binary parameter, including sample delay
+    bool read(uint32_t* sampleDelay) const;
+
     template<typename T>
     parameter& write(const T& value);
+
+    // set the state of a binary parameter with a sample delay
+    parameter& write(bool gate, uint32_t sampleDelay);
 
     // overloading dereference with float conversion because it will be used so often
     float operator*() const { return read<float>(); }
@@ -249,10 +258,10 @@ namespace vessl
 
     union
     {
-      bool b;
-      long i;
-      double a;
-      void* u;
+      size_t  b;
+      int64_t i;
+      double  a;
+      void*   u;
     } pv;
 
     type pt;
@@ -360,7 +369,7 @@ namespace vessl
     template<typename T>
     struct nearest
     {
-      T operator()(const T* buffer, double fracIdx);
+      T operator()(const T* buffer, float fracIdx);
     };
 
     template<typename T>
@@ -406,16 +415,70 @@ namespace vessl
 
     template<typename T>
     T wrap01(T val) { return wrap(val, T(0), T(1)); }
-
-#ifndef clamp
+    
     template<typename T>
-    T clamp(T val, T low, T high)
+    T constrain(T val, T low, T high)
     {
       return val < low ? low : val > high ? high : val;
     }
-#endif
   }
 
+  namespace easing
+  {
+    struct linear
+    {
+      float operator()(float t) const { return t; }
+    };
+
+    template<typename T, typename E = linear>
+    float interp(T begin, T end, float t)
+    {
+      static E ease;
+      return (end-begin) * ease(t) + begin;
+    }
+  }
+  
+  struct time
+  {
+    // convert bpm to frequency in Hz
+    static constexpr float B2F = 1.0f / 60.0f;
+    static constexpr float F2B = 60.f;
+    
+    float sampleRate;
+    size_t period; // in samples
+
+    static time fromBpm(float bpm, float sr) { return { sr, static_cast<size_t>(sr/(bpm*B2F)) }; }
+    float toBpm() const { return F2B*(sampleRate/static_cast<float>(period)); }
+  };
+  
+  // support for tempo detection of a clock signal (i.e. pulse train)
+  class clockable
+  {
+  protected:
+    time   tempo;
+    size_t periodMin;
+    size_t periodMax;
+    size_t ticks;
+
+    clockable(float sampleRate, size_t samplePeriodMin, size_t samplePeriodMax, float bpm = 60)
+    : tempo(time::fromBpm(bpm, sampleRate)), periodMin(samplePeriodMin), periodMax(samplePeriodMax), ticks(0)
+    {}
+
+    // subclasses should call tick for every sample generated/processed
+    void tick() { ++ticks; }
+    void tick(size_t t) { ticks += t; }
+
+    // subclass can override this to be notified every time they receive a clock pulse
+    virtual void tock(size_t sampleDelay) {}
+    
+  public:
+    // users should call clock at the beginning of every clock pulse
+    void clock() { tempo.period = math::constrain(ticks, periodMin, periodMax); ticks = 0; tock(0); }
+    void clock(size_t sampleDelay) { tempo.period = math::constrain(ticks + sampleDelay, periodMin, periodMax); ticks = 0; tock(sampleDelay); }
+
+    float getBpm() const { return tempo.toBpm(); }
+  };
+  
   // a waveform that can be evaluated using a normalized phase value
   // implementors should accept negative phase, as well as phase values outside [-1,1]
   template<typename T>
@@ -466,13 +529,6 @@ namespace vessl
     // implement waveform:
     T evaluate(float phase) const override;
   };
-
-  // @todo easings namespace similar to interpolation namespace
-  template<typename T>
-  T lerp(T v1, T v2, float a)
-  {
-    return v1 + (v2 - v1) * a;
-  }
 
   // @todo refactor this to work like interpolation?
   enum class noiseTint : uint8_t
@@ -683,6 +739,14 @@ namespace vessl
   }
 
   template<typename T>
+  void processor<T>::process(array<T> in, array<T> out)
+  {
+    auto r = in.getReader();
+    auto w = out.getWriter();
+    process(r, w);
+  }
+
+  template<typename T>
   typename array<T>::writer array<T>::writer::operator<<(const reader& r)
   {
     size_t rsz = r.available();
@@ -771,13 +835,34 @@ namespace vessl
     }
   }
 
+  inline bool parameter::read(uint32_t* sampleDelay) const
+  {
+    *sampleDelay = static_cast<uint32_t>(pv.b >> 1);
+    return pv.b & 1;
+  }
+
+  inline parameter& parameter::write(bool gate, uint32_t sampleDelay)
+  {
+    pv.b = gate & sampleDelay << 1;
+    return *this;
+  }
+
   template<typename T>
   T parameter::read() const
   {
     // ReSharper disable once CppDefaultCaseNotHandledInSwitchStatement
     switch (pt)
     {
-      case type::binary: return static_cast<T>(pv.b);
+      case type::binary:
+      {
+        // if we were set with a sample delay, decrement the sample delay
+        // and report the opposite value of our first bit
+        bool state = pv.b & 1;
+        uint32_t sampleDelay = static_cast<uint32_t>(pv.b >> 1);
+        if (sampleDelay == 0) { return static_cast<T>(state); }
+        const_cast<parameter*>(this)->pv.b = state & (sampleDelay - 1) << 1;
+        return static_cast<T>(!state);
+      }
       case type::digital: return static_cast<T>(pv.i);
       case type::analog: return static_cast<T>(pv.a);
       case type::user: return pv.u ? *static_cast<T*>(pv.u) : T();
@@ -792,7 +877,7 @@ namespace vessl
     switch (pt)
     {
       case type::binary: pv.b = static_cast<bool>(value); break;
-      case type::digital: pv.i = static_cast<long>(value); break;
+      case type::digital: pv.i = static_cast<int64_t>(value); break;
       case type::analog: pv.a = static_cast<double>(value); break;
       case type::user: if (pv.u) { *static_cast<T*>(pv.u) = value; } break;
     }
@@ -835,7 +920,7 @@ namespace vessl
   }
 
   template<typename T>
-  T interpolation::nearest<T>::operator()(const T* buffer, double fracIdx)
+  T interpolation::nearest<T>::operator()(const T* buffer, float fracIdx)
   {
     return buffer[static_cast<size_t>(round(fracIdx))];
   }
@@ -944,7 +1029,7 @@ namespace vessl
         static T prev = 0;
         T alpha = dt / (dt + RC);
         T white = 2 * (static_cast<T>(rand()) / RAND_MAX) - 1;
-        prev = lerp<T>(prev, white, alpha);
+        prev = easing::interp(prev, white, alpha);
         return prev * AC;
       }
 
@@ -1025,7 +1110,7 @@ namespace vessl
         eorw() << T(1);
       }
     }
-    return lerp<T>(mFrom, mTo, lt);
+    return easing::interp(mFrom, mTo, lt);
   }
 
   template<typename T>
@@ -1076,7 +1161,7 @@ namespace vessl
   T delay<T, I>::process(const T& in)
   {
     // smooth time parameter to prevent crunchiness when it is noisy or changes by large amounts
-    mTime = lerp(mTime, *time(), dt() * 10);
+    mTime = easing::interp(mTime, *time(), dt() * 10);
     // delay time in samples
     float dts = clamp(mTime * unit::getSampleRate(), 0, (float)buffer.getSize()-1);
     float fbk = clamp(feedback() >> fbk, -1.f, 1.f);

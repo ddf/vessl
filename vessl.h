@@ -24,10 +24,12 @@
 
 // ReSharper disable CppClangTidyPortabilityTemplateVirtualMemberFunction
 #pragma once
-#include <cmath>
-#include <cfloat>
+#include <cstdlib>
 #include <cassert>
-#include <cstring> // for memcpy
+#include <cmath>
+#include <cstdint>
+#include <cstring>
+#include <limits>
 
 // When built for ARM Cortex-M processor series,
 // we provide template specializations that use the optimized CMSIS library:
@@ -39,6 +41,15 @@
 #ifndef PI
 #define PI 3.14159265358979323846
 #endif
+
+// mainly to get Rider to shut up about not being able to find assert even though we include <cassert>
+#ifndef NDEBUG
+#ifndef assert
+static void assert(bool condition) { }
+#endif
+#endif
+
+#define VASSERT(cond, msg) assert((void(msg), cond))
 
 // Note: In all classes using typename T, it is assumed to be POD and to have support for all arithmetical operators
 namespace vessl
@@ -383,20 +394,30 @@ namespace vessl
     {
       T operator()(const T* buffer, float fracIdx);
     };
+    
+    template<typename T, typename I = linear<T>>
+    T sample(const T* buffer, float fracIdx)
+    {
+      VASSERT(fracIdx >= 0, "fracIdx argument to sample must be non-negative");
+      static I interpolator;
+      return interpolator(buffer, fracIdx);
+    }
   };
 
-  template<typename T, typename I = interpolation::linear<T>>
-  T sample(const T* buffer, float fracIdx)
-  {
-    assert(fracIdx >= 0 && "fracIdx argument to sample must be non-negative!");
-    static I interpolator;
-    return interpolator(buffer, fracIdx);
-  }
-
+  // @todo add all functions used by vessl and call into here.
+  // for the most part these should default to standard math calls,
+  // so that if those calls are redefined by a platform, we can take advantage of that.
+  // e.g. by including basicmaths.h before including vessl on OWL.
   namespace math
   {
     template<typename T>
+    struct epsilon { static constexpr T value = std::numeric_limits<T>::epsilon(); };
+    
+    template<typename T>
     T max(T a, T b) { return a > b ? a : b; }
+
+    template<typename T>
+    T mod(T v, T* i) { return modf(v, i); }
     
     template<typename T>
     T wrap(T val, T low, T high)
@@ -421,8 +442,18 @@ namespace vessl
     {
       return val < low ? low : val > high ? high : val;
     }
+
+    template<typename T>
+    bool isNan(T n) { return isnan(n); }
   }
 
+  namespace random
+  {
+    static constexpr int I32_MAX = RAND_MAX;
+    inline void si32(unsigned seed) { srand(seed); }
+    inline int i32() { return rand(); }
+  }
+  
   namespace easing
   {
     struct linear
@@ -431,7 +462,7 @@ namespace vessl
     };
 
     template<typename T, typename E = linear>
-    float interp(T begin, T end, float t)
+    T interp(T begin, T end, float t)
     {
       static E ease;
       return (end-begin) * ease(t) + begin;
@@ -472,6 +503,12 @@ namespace vessl
     virtual void tock(size_t sampleDelay) {}
     
   public:
+    virtual ~clockable() = default;
+    clockable(const clockable&) = default;
+    clockable(clockable&&) = default;
+    clockable& operator=(const clockable&) = default;
+    clockable& operator=(clockable&&) = default
+    ;
     // users should call clock at the beginning of every clock pulse
     void clock() { tempo.period = math::constrain(ticks, periodMin, periodMax); ticks = 0; tock(0); }
     void clock(size_t sampleDelay) { tempo.period = math::constrain(ticks + sampleDelay, periodMin, periodMax); ticks = 0; tock(sampleDelay); }
@@ -576,7 +613,7 @@ namespace vessl
     T generate() override;
   };
 
-    // unit that generates a linear ramp from one value to another over a duration of seconds
+  // unit that generates a linear ramp from one value to another over a duration of seconds
   // @todo implement easings above and add that as a template parameter
   template<typename T>
   class ramp final : public unitGenerator<T>
@@ -751,7 +788,7 @@ namespace vessl
   {
     size_t rsz = r.available();
     size_t wsz = available();
-    assert(wsz >= rsz);
+    VASSERT(wsz >= rsz, "Not enough space in writer for the contents of reader");
     const T* rh = *r;
     memcpy(static_cast<void*>(head), static_cast<const void*>(rh), rsz * sizeof(T));
     head += rsz;
@@ -769,7 +806,7 @@ namespace vessl
   template<typename T>
   array<T> array<T>::add(array other, array dest)
   {
-    assert(size == other.size && size <= dest.size);
+    VASSERT(size == other.size && size <= dest.size, "arrays are have different lengths or destination is too small");
     reader a(data, size);
     reader b(other.data, other.size);
     writer c(dest.data, dest.size);
@@ -783,7 +820,7 @@ namespace vessl
   template<typename T>
   array<T> array<T>::scale(T value, array dest)
   {
-    assert(size <= dest.size);
+    VASSERT(size <= dest.size, "destination size is too small");
     reader a(data, size);
     writer b(dest.data, dest.size);
     while (a)
@@ -813,7 +850,7 @@ namespace vessl
   template<typename T>
   ring<T> ring<T>::operator<<(typename array<T>::reader r)
   {
-    assert(r.available() < getSize());
+    VASSERT(r.available() < getSize(), "reader size is larger than ring size");
     while (r)
     {
       write(r.read());
@@ -829,9 +866,6 @@ namespace vessl
       case type::digital: pv.i = 0; break;
       case type::analog: pv.a = 0; break;
       case type::user: pv.u = nullptr; break;
-
-      default: assert(false && "attempted to initialize a parameter with an unknown type");
-        break;  // NOLINT(clang-diagnostic-covered-switch-default)
     }
   }
 
@@ -929,7 +963,7 @@ namespace vessl
   T interpolation::linear<T>::operator()(const T* buffer, float fracIdx)
   {
     float idx;
-    float frac = modf(fracIdx, &idx);
+    float frac = math::mod(fracIdx, &idx);
     size_t x0 = static_cast<size_t>(idx);
     return buffer[x0] + (buffer[x0 + 1] - buffer[x0]) * frac;
   }
@@ -941,7 +975,7 @@ namespace vessl
     static const T DIV2 = static_cast<T>(0.5);
 
     float idx;
-    float f = modf(fracIdx, &idx);
+    float f = math::mod(fracIdx, &idx);
     float fm1 = f - 1.f;
     float fm2 = f - 2.f;
     float fp1 = f + 1.f;
@@ -1005,7 +1039,7 @@ namespace vessl
     float idx = phase * N;
     while (idx > N) { idx -= N; }
     while (idx < 0) { idx += N; }
-    return sample<T, I>(buffer, idx);
+    return interpolation::sample<T, I>(buffer, idx);
   }
 
   template<typename T>
@@ -1015,7 +1049,7 @@ namespace vessl
     {
       case noiseTint::white:
       {
-        return 2 * (static_cast<T>(rand()) / RAND_MAX) - 1;
+        return 2 * (static_cast<T>(random::i32()) / random::I32_MAX) - 1;
       }
 
       // #TODO: this contains clicks when run at audio frequency and I'm not sure why.
@@ -1028,7 +1062,7 @@ namespace vessl
         static const T AC = 6.2;
         static T prev = 0;
         T alpha = dt / (dt + RC);
-        T white = 2 * (static_cast<T>(rand()) / RAND_MAX) - 1;
+        T white = 2 * (static_cast<T>(random::i32()) / random::I32_MAX) - 1;
         prev = easing::interp(prev, white, alpha);
         return prev * AC;
       }
@@ -1041,7 +1075,9 @@ namespace vessl
         static constexpr int MAX_KEY = 0x1f;
         static int key = 0;
         static T maxSum = 90;
-        static int whiteValues[6] = { rand() % (RANGE / 6), rand() % (RANGE / 6), rand() % (RANGE / 6), rand() % (RANGE / 6), rand() % (RANGE / 6), rand() % (RANGE / 6) };
+        static int whiteValues[6] = {
+          random::i32() % (RANGE / 6), random::i32() % (RANGE / 6), random::i32() % (RANGE / 6),
+          random::i32() % (RANGE / 6), random::i32() % (RANGE / 6), random::i32() % (RANGE / 6) };
 
         int lastKey = key;
         T sum = 0;
@@ -1052,13 +1088,13 @@ namespace vessl
         {
           if ((diff & (1 << i)) != 0)
           {
-            whiteValues[i] = rand() % (RANGE / 6);
+            whiteValues[i] = random::i32() % (RANGE / 6);
           }
           sum += whiteValues[i];
         }
-        maxSum = std::max<T>(sum, maxSum);
+        maxSum = math::max(sum, maxSum);
         T n = 2 * (sum / maxSum) - 1;
-        assert(!isnan(n) && "pink noise generated nan");
+        vassert(!math::isNan(n) && "pink noise generated nan");
         return n;
       }
     }
@@ -1085,7 +1121,7 @@ namespace vessl
   template<typename T>
   void ramp<T>::trigger()
   {
-    if (duration() > FLT_EPSILON)
+    if (duration() > math::epsilon<float>::value)
     {
       t = 0;
       eorw() << T(0);
@@ -1139,13 +1175,13 @@ namespace vessl
     assert(sampleDelay >= 0 && sampleDelay < fSize - 1);
     sampleDelay = static_cast<float>(getWriteIndex() + 1) + sampleDelay;
     float idx;
-    float f = modf(sampleDelay, &idx);
+    float f = math::mod(sampleDelay, &idx);
     size_t x0 = static_cast<size_t>(idx) % getSize();
     size_t x1 = (x0 + 1) % getSize();
     size_t x2 = (x0 + 2) % getSize();
     const T* data = getData();
     T s[3] = { data[x0], data[x1], data[x2] };
-    return sample<T, I>(s, f);
+    return interpolation::sample<T, I>(s, f);
   }
 
   template<typename T>
@@ -1163,8 +1199,8 @@ namespace vessl
     // smooth time parameter to prevent crunchiness when it is noisy or changes by large amounts
     mTime = easing::interp(mTime, *time(), dt() * 10);
     // delay time in samples
-    float dts = clamp(mTime * unit::getSampleRate(), 0, (float)buffer.getSize()-1);
-    float fbk = clamp(feedback() >> fbk, -1.f, 1.f);
+    float dts = math::constrain(mTime * unit::getSampleRate(), 0.f, static_cast<float>(buffer.getSize()-1));
+    float fbk = math::constrain(feedback() >> fbk, -1.f, 1.f);
     T s = buffer.template read<I>(dts);
     buffer.write(in + s * fbk);
     return s;

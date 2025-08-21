@@ -234,10 +234,6 @@ namespace vessl
     };
 
     parameter(const char* name, type type);
-    parameter(const char* name, bool value) : pn(name), pt(type::binary) { pv.b = value; }
-    parameter(const char* name, long value) : pn(name), pt(type::digital) { pv.i = value; }
-    parameter(const char* name, double value) : pn(name), pt(type::analog) { pv.a = value; }
-    parameter(const char* name, void* value) : pn(name), pt(type::user) { pv.u = value; }
 
     const char* getName() const { return pn; }
     type getType() const { return pt; }
@@ -411,7 +407,7 @@ namespace vessl
   namespace math
   {
     template<typename T>
-    struct epsilon { static constexpr T value = std::numeric_limits<T>::epsilon(); };
+    T epsilon() { return std::numeric_limits<T>::epsilon(); }
     
     template<typename T>
     T max(T a, T b) { return a > b ? a : b; }
@@ -664,6 +660,66 @@ namespace vessl
     parameter& eorw() { return init.params[3]; }
   };
 
+  template<typename T>
+  class slew : public unitProcessor<T>
+  {
+    T value;
+    T epsilon;
+    
+    unit::init<4> init = {
+      "slew",
+      {
+        parameter("rise", parameter::type::analog),
+        parameter("fall", parameter::type::analog),
+        parameter("rising", parameter::type::binary),
+        parameter("falling", parameter::type::binary)
+      }
+    };
+
+    parameter& rw() { return init.params[2]; }
+    parameter& fw() { return init.params[3]; }
+
+    using unit::dt;
+    using unit::getSampleRate;
+
+  public:
+    // note: choice of epsilon will depend on the amount of noise in the signal to be slewed.
+    // the default value was chosen based on testing with an OWL module.
+    slew(float sampleRate, float riseRate, float fallRate, T initialValue = T(0), T epsilon = math::epsilon<T>()*1000)
+    : unitProcessor<T>(init, sampleRate), value(initialValue), epsilon(epsilon)
+    { rise() << riseRate; fall() << fallRate; }
+
+    parameter& rise() { return init.params[0]; }
+    parameter& fall() { return init.params[1]; }
+    const parameter& rising() const { return init.params[2]; }
+    const parameter& falling() const { return init.params[3]; }
+
+    T process(const T& v) override;
+
+    using processor<T>::process;
+  };
+
+  template<typename T>
+  class smoother : public unitProcessor<T>
+  {
+    T value;
+    unit::init<1> init = {
+      "smoother",
+      {
+        parameter("degree", parameter::type::analog),
+      }
+    };
+  public:
+    explicit smoother(float initialValue, float smoothingDegree = 0.9f) : unitProcessor<T>(init), value(initialValue)
+    { degree() << smoothingDegree; }
+
+    parameter& degree() { return init.params[0]; }
+
+    T process(const T& v) override { return value = easing::interp(v, value, math::constrain(*degree(), 0.f, 1.f)); }
+    // for block processing
+    using unitProcessor<T>::process;
+  };
+  
   template<typename T>
   class oscil final : public unitGenerator<T>
   {
@@ -1061,7 +1117,7 @@ namespace vessl
         static const T RC = static_cast<T>(1) / (PI * 200);
         static const T AC = 6.2;
         static T prev = 0;
-        T alpha = dt / (dt + RC);
+        float alpha = dt / (dt + RC);
         T white = 2 * (static_cast<T>(random::i32()) / random::I32_MAX) - 1;
         prev = easing::interp(prev, white, alpha);
         return prev * AC;
@@ -1121,7 +1177,7 @@ namespace vessl
   template<typename T>
   void ramp<T>::trigger()
   {
-    if (duration() > math::epsilon<float>::value)
+    if (duration() > math::epsilon<float>())
     {
       t = 0;
       eorw() << T(0);
@@ -1147,6 +1203,18 @@ namespace vessl
       }
     }
     return easing::interp(mFrom, mTo, lt);
+  }
+
+  template<typename T>
+  T slew<T>::process(const T& v)
+  {
+    bool isRise = v > value+epsilon;
+    bool isFall = v < value-epsilon;
+    float rate = isRise ? *rise() : isFall ? -1.0f*fall() : (v-value)*getSampleRate();
+    value += rate*dt();
+    rw() << isRise;
+    fw() << isFall;
+    return value;
   }
 
   template<typename T>

@@ -745,7 +745,7 @@ namespace vessl
     const parameter& eoc() const { return init.params[0]; }
 
     // make this a parameter we check in generate?
-    void trigger()
+    virtual void trigger()
     {
       for (stage& stage : stages)
       {
@@ -804,10 +804,53 @@ namespace vessl
 
     typename envelope<T>::stage& attack() { return attackStage; }
     typename envelope<T>::stage& decay() { return envelope<T>::getFinalStage(); }
+    using envelope<T>::eoc;
 
     using envelope<T>::trigger;
     using envelope<T>::generate;
-    using envelope<T>::eoc;
+  };
+
+  template<typename T>
+  class asr : public ad<T>
+  {
+    T dynamicGate;
+    T triggerThreshold;
+    bool gateOn;
+    
+  public:
+    asr(float attackDuration, float decayDuration, float sampleRate, T triggerThreshold = T(0))
+    : ad<T>(attackDuration, decayDuration, sampleRate)
+    , dynamicGate(0), triggerThreshold(triggerThreshold), gateOn(false) {}
+
+    using ad<T>::attack;
+    using ad<T>::decay;
+    using ad<T>::eoc; 
+
+    void gate(T value)
+    {
+      bool valueOn = value > triggerThreshold;
+      if (!gateOn && valueOn)
+      {
+        ad<T>::trigger();
+        gateOn = true;
+        // reset the dynamic gate because where the gate value ends up might be less than the previous dynamicGate
+        dynamicGate = 0;
+      }
+      else if (gateOn && !valueOn)
+      {
+        gateOn = false;
+      }
+      dynamicGate = math::max(value, dynamicGate);
+    }
+    void gate(bool on) { gate(on ? T(1) : T(0));}
+    void trigger() override { ad<T>::trigger(); dynamicGate = 1; gateOn = false; }
+    T generate() override { return dynamicGate*ad<T>::generate(); }
+
+  protected:
+    bool shouldAdvance(int currentStageIdx) override
+    {
+      return ad<T>::shouldAdvance(currentStageIdx) && !gateOn;
+    }
   };
 
   template<typename T>
@@ -1211,6 +1254,7 @@ namespace vessl
     }
   }
 
+  // @todo ARM specializations for this that utilize the table-based interpolation methods.
   template<typename T, size_t N, typename I>
   T wavetable<T, N, I>::evaluate(float phase) const
   {

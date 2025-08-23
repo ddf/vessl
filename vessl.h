@@ -736,7 +736,7 @@ namespace vessl
       }
     };
     array<stage> stages;
-    int stageIdx;
+    size_t stageIdx;
     stage final;
     parameter& eocw() { return init.params[0]; }
 
@@ -745,13 +745,16 @@ namespace vessl
     , stages(stages, stageCount), stageIdx(0), final(sampleRate) {}
     
   public:
-    stage& getStage(int idx) { return idx == stages.getSize() ? final : stages[idx]; }
-    const stage& getStage(int idx) const { return idx == stages.getSize() ? final : stages[idx]; }
+    stage& getStage(size_t idx) { return idx == stages.getSize() ? final : stages[idx]; }
+    const stage& getStage(size_t idx) const { return idx == stages.getSize() ? final : stages[idx]; }
     int getStageCount() const { return stages.size() + 1; }
 
     stage& currentStage() { return getStage(stageIdx); }
+    const stage& currentStage() const { return getStage(stageIdx);}
     stage& finalStage() { return final; }
+    const stage& finalStage() const { return final; }
 
+    const parameter& value() const { return currentStage().value(); }
     const parameter& eoc() const { return init.params[0]; }
 
     // make this a parameter we check in generate?
@@ -769,7 +772,7 @@ namespace vessl
     // subclasses can override this behavior per stage
     // to enable advancing to the next stage before it is finished,
     // or holding a stage for some period of time.
-    virtual bool shouldAdvance(int currentStageIdx) { return getStage(currentStageIdx).eos().template read<bool>(); }
+    virtual bool shouldAdvance(size_t currentStageIdx) { return getStage(currentStageIdx).eos().template read<bool>(); }
   };
 
   template<typename T>
@@ -792,25 +795,24 @@ namespace vessl
   template<typename T>
   class asr : public ad<T>
   {
-    T dynamicGate;
     T triggerThreshold;
     bool gateOn;
     
   public:
     asr(float attackDuration, float decayDuration, float sampleRate, T triggerThreshold = T(0))
-    : ad<T>(attackDuration, decayDuration, sampleRate), dynamicGate(0), triggerThreshold(triggerThreshold), gateOn(false) {}
+    : ad<T>(attackDuration, decayDuration, sampleRate), triggerThreshold(triggerThreshold), gateOn(false) {}
 
     using ad<T>::attack;
-    using ad<T>::decay;
+    typename envelope<T>::stage& release() { return envelope<T>::finalStage(); }
     using ad<T>::eoc; 
 
     void gate(T value);
     void gate(bool on) { gate(on ? T(1) : T(0));}
-    void trigger() override { ad<T>::trigger(); dynamicGate = 1; gateOn = false; }
-    T generate() override { return dynamicGate*ad<T>::generate(); }
+    void trigger() override { attack().target() << T(1); ad<T>::trigger(); gateOn = false; }
+    using envelope<T>::generate;
 
   protected:
-    bool shouldAdvance(int currentStageIdx) override { return ad<T>::shouldAdvance(currentStageIdx) && !gateOn; }
+    bool shouldAdvance(size_t currentStageIdx) override { return ad<T>::shouldAdvance(currentStageIdx) && !gateOn; }
   };
 
   template<typename T>
@@ -854,7 +856,7 @@ namespace vessl
     using envelope<T>::generate;
 
   protected:
-    bool shouldAdvance(int currentStageIdx) override
+    bool shouldAdvance(size_t currentStageIdx) override
     {
       return currentStageIdx == 1 ? decayStage.eos() && !gateOn : envelope<T>::shouldAdvance(currentStageIdx);
     }
@@ -1438,18 +1440,24 @@ namespace vessl
   void asr<T>::gate(T value)
   {
     bool valueOn = value > triggerThreshold;
+    T attackTarget = attack().target().template read<T>();
     if (!gateOn && valueOn)
     {
       ad<T>::trigger();
       gateOn = true;
-      // reset the dynamic gate because where the gate value ends up might be less than the previous dynamicGate
-      dynamicGate = 0;
+      // reset the attackTarget because where the gate value ends up might be less than the previous attackTarget
+      attackTarget = 0;
     }
     else if (gateOn && !valueOn)
     {
       gateOn = false;
+      // if we're mid-attack, start the release
+      if (attack().active())
+      {
+        envelope<T>::startStage(1, attack().value().template read<T>());
+      }
     }
-    dynamicGate = math::max(value, dynamicGate);
+    attack().target() << math::max(value, attackTarget);
   }
 
   template<typename T>

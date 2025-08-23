@@ -403,37 +403,36 @@ namespace vessl
   namespace math
   {
     template<typename T>
+    T constrain(T val, T low, T high)
+    {
+      return val < low ? low : val > high ? high : val;
+    }
+    
+    template<typename T>
     T epsilon() { return std::numeric_limits<T>::epsilon(); }
     
     template<typename T>
     T max(T a, T b) { return a > b ? a : b; }
 
     template<typename T>
-    T mod(T v, T* i) { return modf(v, i); }
+    T mod(T v, T* i) { return ::modf(v, i); }
+
+    template<typename T>
+    T pow(T x, T y) { return ::pow(x, y); }
     
     template<typename T>
     T wrap(T val, T low, T high)
     {
+      // @todo probably a way to do this without while loops.
       T diff = high - low;
-      while (val < low)
-      {
-        val += diff;
-      }
-      while (val > high)
-      {
-        val -= diff;
-      }
+      while (val < low) { val += diff; }
+      while (val > high) { val -= diff; }
       return val;
     }
 
+    // @todo use modf here
     template<typename T>
     T wrap01(T val) { return wrap(val, T(0), T(1)); }
-    
-    template<typename T>
-    T constrain(T val, T low, T high)
-    {
-      return val < low ? low : val > high ? high : val;
-    }
 
     template<typename T>
     bool isNan(T n) { return isnan(n); }
@@ -452,6 +451,30 @@ namespace vessl
     {
       float operator()(float t) const { return t; }
     };
+
+    namespace quad
+    {
+      struct in { float operator()(float t) const { return t * t; } };
+      struct out { float operator()(float t) const { return 1.0f - (1.0f - t) * (1.0f - t); } };
+      struct inOut { float operator()(float t) const { return t < 0.5f ? 2*t*t : 1.0f - math::pow(-2.0f*t+2.0f, 2.0f) * 0.5f;  } };
+      struct outIn { static out qo; float operator()(float t) const { return t < 0.5f ? qo(2.0f*t) * 0.5f : 1.0f - qo(2.0f*t) * 0.5f; } };
+    }
+
+    namespace expo
+    {
+      struct in { float operator()(float t) const { return t <= math::epsilon<float>() ? 0.f : math::pow(2.f, 10*t-10); } };
+      struct out { float operator()(float t) const { return t >= 1.0f - math::epsilon<float>() ? 1.0f : 1.0f - math::pow(2.0f, -10*t);} };
+      struct inOut
+      {
+        float operator()(float t) const
+        {
+          return t <= math::epsilon<float>() ? 0.0f
+          : t >= 1.0f - math::epsilon<float>() ? 1.0f
+          : t < 0.5f ? math::pow(2.f, 20*t-10)*0.5f
+          : 2.0f - math::pow(2.f, -20*t+10)*0.5f;
+        }
+      };
+    }
 
     template<typename T, typename E = linear>
     T interp(T begin, T end, float t)
@@ -666,54 +689,42 @@ namespace vessl
     class stage final : public unitGenerator<T>
     {
       T mTarget;
-      unit::init<4> init = {
+      T mValue; // current value of the stage
+      unit::init<5> init = {
         "stage",
         {
           parameter("target", &mTarget),
           parameter("duration", parameter::type::analog),
           parameter("active", parameter::type::binary),
-          parameter("end of stage", parameter::type::binary)
+          parameter("end of stage", parameter::type::binary),
+          parameter("value", &mValue)
         }
       };
 
       T begin; // value the stage started with
-      T value; // current value of the stage
       // where we are in the stage
       float time;
       parameter& aw() { return init.params[2]; }
       parameter& ew() { return init.params[3]; }
       
       template<typename E>
-      T step()
-      {
-        float dt = unit::dt();
-        float s = unit::dt() / math::max(*duration(), dt);
-        time += s;
-        float t = math::constrain(time, 0.f, 1.f);
-        value = easing::interp<T, E>(begin, mTarget, t);
-        if (time >= 1)
-        {
-          aw() << false;
-          ew() << true;
-        }
-        return value;
-      }
-      
+      T step();
+
     public:
-      explicit stage(float sampleRate) : unitGenerator<T>(init, sampleRate)
-      , mTarget(0), begin(0)
-      { reset(); }
+      explicit stage(float sampleRate) : unitGenerator<T>(init, sampleRate), mTarget(0), begin(0) { reset(); }
 
       parameter& target() { return init.params[0]; }
       parameter& duration() { return init.params[1]; }
       const parameter& active() const { return init.params[2]; }
       const parameter& eos() const { return init.params[3]; }
+      // current value of the stage
+      const parameter& value() const { return init.params[4]; }
 
-      void start(T fromValue) { begin = fromValue; value = begin; time = -unit::dt(); aw() << true; ew() << false; }
-      void reset() { aw() << false; ew() << false; time = -unit::dt(); value = 0; }
+      void start(T fromValue) { begin = fromValue; mValue = fromValue; time = -unit::dt(); aw() << true; ew() << false; }
+      void reset() { aw() << false; ew() << false; time = -unit::dt(); mValue = 0; }
 
       template<typename E>
-      T generate() { return active() ? step<E>() : value; }
+      T generate() { return active() ? step<E>() : mValue; }
       T generate() override { return generate<easing::linear>(); }
     };
   
@@ -731,62 +742,34 @@ namespace vessl
 
   protected:
     envelope(stage* stages, int stageCount, float sampleRate) : unitGenerator<T>(init, sampleRate)
-    , stages(stages, stageCount), stageIdx(0), final(sampleRate)
-    {}
+    , stages(stages, stageCount), stageIdx(0), final(sampleRate) {}
     
   public:
-    stage& getStage(int idx) { return stageIdx == stages.getSize() ? final : stages[stageIdx]; }
-    const stage& getStage(int idx) const { return stageIdx == stages.getSize() ? final : stages[stageIdx]; }
+    stage& getStage(int idx) { return idx == stages.getSize() ? final : stages[idx]; }
+    const stage& getStage(int idx) const { return idx == stages.getSize() ? final : stages[idx]; }
     int getStageCount() const { return stages.size() + 1; }
 
-    stage& getCurrentStage() { return getStage(stageIdx); }
-    stage& getFinalStage() { return final; }
+    stage& currentStage() { return getStage(stageIdx); }
+    stage& finalStage() { return final; }
 
     const parameter& eoc() const { return init.params[0]; }
 
     // make this a parameter we check in generate?
-    virtual void trigger()
-    {
-      for (stage& stage : stages)
-      {
-        stage.reset();
-      }
-      final.reset();
-      eocw() << false;
-      stageIdx = 0;
-      stages[0].start(0);
-    }
-    
-    T generate() override
-    {
-      stage& currentStage = getCurrentStage();
-      T value = currentStage.generate();
-      if (stageIdx == stages.getSize() && final.eos())
-      {
-        eocw() << true;
-      }
-      else if (shouldAdvance(stageIdx))
-      {
-        getStage(++stageIdx).start(value);
-      }
-      return value;
-    }
+    virtual void trigger();
+
+    template<typename E>
+    T generate();
+    T generate() override { return generate<easing::linear>(); }
 
   protected:
+    void onSampleRateChanged() override;
+    void startStage(int idx, T fromValue) { getStage(idx).start(fromValue); stageIdx = idx; }
+    
     // by default, stages advance automatically when their eos goes high.
     // subclasses can override this behavior per stage
     // to enable advancing to the next stage before it is finished,
     // or holding a stage for some period of time.
     virtual bool shouldAdvance(int currentStageIdx) { return getStage(currentStageIdx).eos().template read<bool>(); }
-    
-    void onSampleRateChanged() override
-    {
-      for (stage& stage : stages)
-      {
-        stage.setSampleRate(unit::getSampleRate());
-      }
-      final.setSampleRate(unit::getSampleRate());
-    }
   };
 
   template<typename T>
@@ -796,14 +779,10 @@ namespace vessl
 
   public:
     ad(float attackDuration, float decayDuration, float sampleRate) : envelope<T>(&attackStage, 1, sampleRate), attackStage(sampleRate)
-    {
-      attack().target() << T(1);
-      attack().duration() << attackDuration;
-      decay().duration() << decayDuration;
-    }
+    { attack().target() << T(1); attack().duration() << attackDuration; decay().duration() << decayDuration; }
 
     typename envelope<T>::stage& attack() { return attackStage; }
-    typename envelope<T>::stage& decay() { return envelope<T>::getFinalStage(); }
+    typename envelope<T>::stage& decay() { return envelope<T>::finalStage(); }
     using envelope<T>::eoc;
 
     using envelope<T>::trigger;
@@ -819,37 +798,65 @@ namespace vessl
     
   public:
     asr(float attackDuration, float decayDuration, float sampleRate, T triggerThreshold = T(0))
-    : ad<T>(attackDuration, decayDuration, sampleRate)
-    , dynamicGate(0), triggerThreshold(triggerThreshold), gateOn(false) {}
+    : ad<T>(attackDuration, decayDuration, sampleRate), dynamicGate(0), triggerThreshold(triggerThreshold), gateOn(false) {}
 
     using ad<T>::attack;
     using ad<T>::decay;
     using ad<T>::eoc; 
 
-    void gate(T value)
-    {
-      bool valueOn = value > triggerThreshold;
-      if (!gateOn && valueOn)
-      {
-        ad<T>::trigger();
-        gateOn = true;
-        // reset the dynamic gate because where the gate value ends up might be less than the previous dynamicGate
-        dynamicGate = 0;
-      }
-      else if (gateOn && !valueOn)
-      {
-        gateOn = false;
-      }
-      dynamicGate = math::max(value, dynamicGate);
-    }
+    void gate(T value);
     void gate(bool on) { gate(on ? T(1) : T(0));}
     void trigger() override { ad<T>::trigger(); dynamicGate = 1; gateOn = false; }
     T generate() override { return dynamicGate*ad<T>::generate(); }
 
   protected:
+    bool shouldAdvance(int currentStageIdx) override { return ad<T>::shouldAdvance(currentStageIdx) && !gateOn; }
+  };
+
+  template<typename T>
+  class adsr : public envelope<T>
+  {
+    typename envelope<T>::stage attackStage;
+    typename envelope<T>::stage decayStage;
+    bool gateOn;
+
+  public:
+    adsr(float attackDuration, float decayDuration, float sustainLevel, float releaseDuration, float sampleRate)
+    : envelope<T>(&attackStage, 2, sampleRate), attackStage(sampleRate), decayStage(sampleRate), gateOn(false)
+    {
+      attackStage.duration() << attackDuration;
+      attackStage.target() << T(1);
+      decayStage.duration() << decayDuration;
+      decayStage.target() << sustainLevel;
+      envelope<T>::finalStage().duration() << releaseDuration;
+    }
+
+    typename envelope<T>::stage& attack() { return attackStage; }
+    typename envelope<T>::stage& decay() { return decayStage; }
+    parameter& sustain() { return decay().target(); }
+    typename envelope<T>::stage& release() { return envelope<T>::finalStage(); }
+    using envelope<T>::eoc;
+
+    // should we jump to the release stage if the gate goes off before we start sustaining??
+    void gate(bool on)
+    {
+      if (on && !gateOn)
+      {
+        envelope<T>::trigger();
+      }
+      else if (gateOn && !on)
+      {
+        envelope<T>::startStage(2, envelope<T>::currentStage().value().template read<T>());
+      }
+      gateOn = on;
+    }
+    void trigger() override { gateOn = false; envelope<T>::trigger(); }
+    using envelope<T>::generate;
+
+  protected:
     bool shouldAdvance(int currentStageIdx) override
     {
-      return ad<T>::shouldAdvance(currentStageIdx) && !gateOn;
+      return currentStageIdx == 1 ? decayStage.eos() && !gateOn : envelope<T>::shouldAdvance(currentStageIdx);
     }
   };
 
@@ -1369,6 +1376,80 @@ namespace vessl
       }
     }
     return easing::interp(mFrom, mTo, lt);
+  }
+
+  template<typename T>
+  template<typename E>
+  T envelope<T>::stage::step()
+  {
+    float dt = unit::dt();
+    float s = unit::dt() / math::max(*duration(), dt);
+    time += s;
+    float t = math::constrain(time, 0.f, 1.f);
+    mValue = easing::interp<T, E>(begin, mTarget, t);
+    if (time >= 1)
+    {
+      aw() << false;
+      ew() << true;
+    }
+    return mValue;
+  }
+
+  template<typename T>
+  void envelope<T>::trigger()
+  {
+    for (stage& stage : stages)
+    {
+      stage.reset();
+    }
+    final.reset();
+    eocw() << false;
+    stageIdx = 0;
+    stages[0].start(0);
+  }
+
+  template<typename T>
+  template<typename E>
+  T envelope<T>::generate()
+  {
+    T value = currentStage().template generate<E>();
+    if (stageIdx == stages.getSize() && final.eos())
+    {
+      eocw() << true;
+    }
+    else if (shouldAdvance(stageIdx))
+    {
+      getStage(++stageIdx).start(value);
+    }
+    return value;
+  }
+
+  template<typename T>
+  void envelope<T>::onSampleRateChanged()
+  {
+    for (stage& stage : stages)
+    {
+      stage.setSampleRate(unit::getSampleRate());
+    }
+    final.setSampleRate(unit::getSampleRate());
+  }
+
+  template<typename T>
+  void asr<T>::gate(T value)
+  {
+    bool valueOn = value > triggerThreshold;
+    if (!gateOn && valueOn)
+    {
+      ad<T>::trigger();
+      gateOn = true;
+      // reset the dynamic gate because where the gate value ends up might be less than the previous dynamicGate
+      dynamicGate = 0;
+    }
+    else if (gateOn && !valueOn)
+    {
+      gateOn = false;
+    }
+    dynamicGate = math::max(value, dynamicGate);
   }
 
   template<typename T>

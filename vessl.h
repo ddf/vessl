@@ -60,10 +60,10 @@ namespace vessl
   public:
     source() = default;
     virtual ~source() = default;
-    source(const source&) = delete;
-    source(const source&&) = delete;
-    source& operator=(const source&) = delete;
-    source& operator=(source&&) = delete;
+    source(const source&) = default;
+    source(source&&) = default;
+    source& operator=(const source&) = default;
+    source& operator=(source&&) = default;
 
     virtual bool isEmpty() const = 0;
     virtual T read() = 0;
@@ -77,10 +77,10 @@ namespace vessl
   public:
     sink() = default;
     virtual ~sink() = default;
-    sink(const sink&) = delete;
-    sink(const sink&&) = delete;
-    sink& operator=(const sink&) = delete;
-    sink& operator=(sink&&) = delete;
+    sink(const sink&) = default;
+    sink(sink&&) = default;
+    sink& operator=(const sink&) = default;
+    sink& operator=(sink&&) = default;
 
     virtual bool isFull() const = 0;
     virtual void write(const T& value) = 0;
@@ -193,7 +193,7 @@ namespace vessl
     processor() = default;
     virtual ~processor() = default;
     processor(const processor&) = delete;
-    processor(const processor&&) = delete;
+    processor(processor&&) = delete;
     processor& operator=(const processor&) = delete;
     processor& operator=(processor&&) = delete;
 
@@ -234,6 +234,7 @@ namespace vessl
     };
 
     parameter(const char* name, type type);
+    parameter(const char* name, void* userData) : pn(name), pt(type::user) { pv.u = userData; }
 
     const char* getName() const { return pn; }
     type getType() const { return pt; }
@@ -253,12 +254,7 @@ namespace vessl
 
     // overloading dereference with float conversion because it will be used so often
     float operator*() const { return read<float>(); }
-
-    template<typename T>
-    T operator!() const;
-
-    template<typename T>
-    T operator-() const;
+    explicit operator bool() const { return read<bool>(); }
 
   private:
     const char* pn;
@@ -660,6 +656,160 @@ namespace vessl
     parameter& eorw() { return init.params[3]; }
   };
 
+  // generates an envelope that begins and ends at zero, with some number of stages leading up to a final stage.
+  // each stage of an envelope is defined by a target value, a duration to reach it,
+  // and whether the envelope should hold the stage value until it is triggered again.
+  template<typename T>
+  class envelope : public unitGenerator<T>
+  {
+  public:
+    class stage final : public unitGenerator<T>
+    {
+      T mTarget;
+      unit::init<4> init = {
+        "stage",
+        {
+          parameter("target", &mTarget),
+          parameter("duration", parameter::type::analog),
+          parameter("active", parameter::type::binary),
+          parameter("end of stage", parameter::type::binary)
+        }
+      };
+
+      T begin; // value the stage started with
+      T value; // current value of the stage
+      // where we are in the stage
+      float time;
+      parameter& aw() { return init.params[2]; }
+      parameter& ew() { return init.params[3]; }
+      
+      template<typename E>
+      T step()
+      {
+        float dt = unit::dt();
+        float s = unit::dt() / math::max(*duration(), dt);
+        time += s;
+        float t = math::constrain(time, 0.f, 1.f);
+        value = easing::interp<T, E>(begin, mTarget, t);
+        if (time >= 1)
+        {
+          aw() << false;
+          ew() << true;
+        }
+        return value;
+      }
+      
+    public:
+      explicit stage(float sampleRate) : unitGenerator<T>(init, sampleRate)
+      , mTarget(0), begin(0)
+      { reset(); }
+
+      parameter& target() { return init.params[0]; }
+      parameter& duration() { return init.params[1]; }
+      const parameter& active() const { return init.params[2]; }
+      const parameter& eos() const { return init.params[3]; }
+
+      void start(T fromValue) { begin = fromValue; value = begin; time = -unit::dt(); aw() << true; ew() << false; }
+      void reset() { aw() << false; ew() << false; time = -unit::dt(); value = 0; }
+
+      template<typename E>
+      T generate() { return active() ? step<E>() : value; }
+      T generate() override { return generate<easing::linear>(); }
+    };
+  
+  private:
+    unit::init<1> init = {
+      "envelope",
+      {
+        parameter("eoc", parameter::type::binary)
+      }
+    };
+    array<stage> stages;
+    int stageIdx;
+    stage final;
+    parameter& eocw() { return init.params[0]; }
+
+  protected:
+    envelope(stage* stages, int stageCount, float sampleRate) : unitGenerator<T>(init, sampleRate)
+    , stages(stages, stageCount), stageIdx(0), final(sampleRate)
+    {}
+    
+  public:
+    stage& getStage(int idx) { return stageIdx == stages.getSize() ? final : stages[stageIdx]; }
+    const stage& getStage(int idx) const { return stageIdx == stages.getSize() ? final : stages[stageIdx]; }
+    int getStageCount() const { return stages.size() + 1; }
+
+    stage& getCurrentStage() { return getStage(stageIdx); }
+    stage& getFinalStage() { return final; }
+
+    const parameter& eoc() const { return init.params[0]; }
+
+    // make this a parameter we check in generate?
+    void trigger()
+    {
+      for (stage& stage : stages)
+      {
+        stage.reset();
+      }
+      final.reset();
+      eocw() << false;
+      stageIdx = 0;
+      stages[0].start(0);
+    }
+    
+    T generate() override
+    {
+      stage& currentStage = getCurrentStage();
+      T value = currentStage.generate();
+      if (stageIdx == stages.getSize() && final.eos())
+      {
+        eocw() << true;
+      }
+      else if (shouldAdvance(stageIdx))
+      {
+        getStage(++stageIdx).start(value);
+      }
+      return value;
+    }
+
+  protected:
+    // by default, stages advance automatically when their eos goes high.
+    // subclasses can override this behavior per stage
+    // to enable advancing to the next stage before it is finished,
+    // or holding a stage for some period of time.
+    virtual bool shouldAdvance(int currentStageIdx) { return getStage(currentStageIdx).eos().template read<bool>(); }
+    
+    void onSampleRateChanged() override
+    {
+      for (stage& stage : stages)
+      {
+        stage.setSampleRate(unit::getSampleRate());
+      }
+      final.setSampleRate(unit::getSampleRate());
+    }
+  };
+
+  template<typename T>
+  class ad : public envelope<T>
+  {
+    typename envelope<T>::stage attackStage;
+
+  public:
+    ad(float attackDuration, float decayDuration, float sampleRate) : envelope<T>(&attackStage, 1, sampleRate), attackStage(sampleRate)
+    {
+      attack().target() << T(1);
+      attack().duration() << attackDuration;
+      decay().duration() << decayDuration;
+    }
+
+    typename envelope<T>::stage& attack() { return attackStage; }
+    typename envelope<T>::stage& decay() { return envelope<T>::getFinalStage(); }
+
+    using envelope<T>::trigger;
+    using envelope<T>::generate;
+    using envelope<T>::eoc;
+  };
+
   template<typename T>
   class slew : public unitProcessor<T>
   {
@@ -684,7 +834,7 @@ namespace vessl
 
   public:
     // note: choice of epsilon will depend on the amount of noise in the signal to be slewed.
-    // the default value was chosen based on testing with an OWL module.
+    // the default value was chosen based on testing with an OWL module's audio input.
     slew(float sampleRate, float riseRate, float fallRate, T initialValue = T(0), T epsilon = math::epsilon<T>()*1000)
     : unitProcessor<T>(init, sampleRate), value(initialValue), epsilon(epsilon)
     { rise() << riseRate; fall() << fallRate; }
@@ -966,40 +1116,12 @@ namespace vessl
     // ReSharper disable once CppDefaultCaseNotHandledInSwitchStatement
     switch (pt)
     {
-      case type::binary: pv.b = static_cast<bool>(value); break;
-      case type::digital: pv.i = static_cast<int64_t>(value); break;
-      case type::analog: pv.a = static_cast<double>(value); break;
+      case type::binary: pv.b = static_cast<const bool&>(value); break;
+      case type::digital: pv.i = static_cast<const int64_t&>(value); break;
+      case type::analog: pv.a = static_cast<const double&>(value); break;
       case type::user: if (pv.u) { *static_cast<T*>(pv.u) = value; } break;
     }
     return *this;
-  }
-
-  template<typename T>
-  T parameter::operator!() const
-  {
-    // ReSharper disable once CppDefaultCaseNotHandledInSwitchStatement
-    switch (pt)
-    {
-      case type::binary: return !read<bool>();
-      case type::digital: return !pv.i;
-      case type::analog: return !pv.a;
-      case type::user: return !(pv.u ? *pv.u : T());
-    }
-    return !T();
-  }
-
-  template<typename T>
-  T parameter::operator-() const
-  {
-    // ReSharper disable once CppDefaultCaseNotHandledInSwitchStatement
-    switch (pt)
-    {
-      case type::binary: return !read<bool>();
-      case type::digital: return -pv.i;
-      case type::analog: return -pv.a;
-      case type::user: return -(pv.u ? *pv.u : T());
-    }
-    return -T();
   }
   
   inline void unit::setSampleRate(float sr)

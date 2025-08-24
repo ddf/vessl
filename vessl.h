@@ -24,11 +24,9 @@
 
 // ReSharper disable CppClangTidyPortabilityTemplateVirtualMemberFunction
 #pragma once
-#include <cstdlib>
 #include <cassert>
 #include <cmath>
 #include <cstdint>
-#include <cstring>
 #include <limits>
 
 // When built for ARM Cortex-M processor series,
@@ -38,8 +36,21 @@
 #include "arm_math.h" 
 #endif //ARM_CORTEX
 
-#ifndef PI
-#define PI 3.14159265358979323846
+// because some people like to redefine these math functions with macros
+#ifdef sqrt
+#undef sqrt
+#endif
+
+#ifdef pow
+#undef pow
+#endif
+
+#ifdef round
+#undef round
+#endif
+
+#ifdef sin
+#undef sin
 #endif
 
 // mainly to get Rider to shut up about not being able to find assert even though we include <cassert>
@@ -216,6 +227,7 @@ namespace vessl
 
     void write(const T& v);
     size_t getWriteIndex() const { return head - array<T>::data; }
+    void setWriteIndex(size_t index) { head = array<T>::data + index; }
 
     ring operator<<(typename array<T>::reader r);
   };
@@ -395,13 +407,20 @@ namespace vessl
       return interpolator(buffer, fracIdx);
     }
   };
-
-  // @todo add all functions used by vessl and call into here.
-  // for the most part these should default to standard math calls,
-  // so that if those calls are redefined by a platform, we can take advantage of that.
-  // e.g. by including basicmaths.h before including vessl on OWL.
+  
+  // for the most part these resolve to standard math calls,
+  // template specializations are provided for ARM_CORTEX where applicable.
   namespace math
   {
+    template<class T>
+    constexpr T e() { return static_cast<T>(2.71828182845904523536); }
+    
+    template<class T>
+    constexpr T pi() { return static_cast<T>(3.1415926535897932385); }
+
+    template<class T>
+    constexpr T twoPi() { return pi<T>() * 2; }
+    
     template<typename T>
     T constrain(T val, T low, T high)
     {
@@ -419,6 +438,15 @@ namespace vessl
 
     template<typename T>
     T pow(T x, T y) { return ::pow(x, y); }
+
+    template<typename T>
+    T round(T x) { return ::round(x); }
+
+    template<typename T>
+    T sin(T x) { return ::sin(x); }
+
+    template<typename T>
+    T sqrt(T x) { return ::sqrt(x); }
     
     template<typename T>
     T wrap(T val, T low, T high)
@@ -554,7 +582,7 @@ namespace vessl
     {
     public:
       sine() = default;
-      T evaluate(float phase) const override { return sin(T(2 * PI * phase)); }
+      T evaluate(float phase) const override { return math::sin(math::twoPi<T>() * phase); }
     };
   }
 
@@ -1283,13 +1311,13 @@ namespace vessl
         return 2 * (static_cast<T>(random::i32()) / random::I32_MAX) - 1;
       }
 
-      // #TODO: this contains clicks when run at audio frequency and I'm not sure why.
-      // Need to either read up on how to do this properly and write a new implementation,
-      // or find some open source code that can be used without causing license issues.
+        // #TODO: this contains clicks when run at audio frequency and I'm not sure why.
+        // Need to either read up on how to do this properly and write a new implementation,
+        // or find some open source code that can be used without causing license issues.
       case noiseTint::red:
       case noiseTint::brown:
       {
-        static const T RC = static_cast<T>(1) / (PI * 200);
+        static const T RC = static_cast<T>(1) / (math::pi<T> * 200);
         static const T AC = 6.2;
         static T prev = 0;
         float alpha = dt / (dt + RC);
@@ -1298,8 +1326,8 @@ namespace vessl
         return prev * AC;
       }
 
-      // This is the Voss algorithm (see: http://www.firstpr.com.au/dsp/pink-noise/)
-      // Would be good to dig into the improvements on the algorithm mentioned later in the article.
+        // This is the Voss algorithm (see: http://www.firstpr.com.au/dsp/pink-noise/)
+        // Would be good to dig into the improvements on the algorithm mentioned later in the article.
       case noiseTint::pink:
       {
         static constexpr int RANGE = 128;
@@ -1530,13 +1558,23 @@ namespace vessl
   }
 
   template<>
-  inline float math::wrap01(float v)
-  {
-    float i;
-    return modf(v, &i);
-  }
+  inline float math::wrap01(float v) { float i; return modf(v, &i); }
 
 #ifdef ARM_CORTEX
+  template<>
+  inline float math::sin(float x) { return arm_sin_f32(x); }
+
+  template<>
+  inline float math::sqrt(float x)
+  {
+    float out;
+    if (ARM_MATH_SUCCESS == arm_sqrt_f32(x, &out))
+    {
+      return out;
+    }
+    return 0;
+  }
+  
   template<>
   array<float> array<float>::add(array other, array dest)
   {

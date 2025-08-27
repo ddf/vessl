@@ -181,6 +181,7 @@ namespace vessl
 
     array operator<<(array copyFrom);
 
+    void fill(T value);
     // returns dest
     array add(array other, array dest);
     // returns this
@@ -196,6 +197,41 @@ namespace vessl
 
   template<typename T>
   T* end(array<T>& arr) { return arr.end(); }
+
+  template<typename T, size_t N>
+  class frame : public array<T>
+  {
+  protected:
+    T samples[N];
+    
+  public:
+    frame() : array<T>(samples, N) { array<T>::fill(0); }
+  };
+
+  template<typename T>
+  class mono : public frame<T, 1>
+  {
+    using frame<T,1>::samples;
+  
+  public:
+    T& value() { return samples[0]; }
+    const T& value() const { return samples[0]; }
+  };
+
+  template<typename T>
+  class stereo : public frame<T, 2>
+  {
+    using frame<T,2>::samples;
+    
+  public:
+    stereo() {}
+    stereo(T l, T r) { samples[0] = l, samples[1] = r; }
+    
+    T& left() { return samples[0]; }
+    const T& left() const { return samples[0]; }
+    T& right() { return samples[1]; }
+    const T& right() const { return samples[1]; }
+  };
 
   template<typename T>
   class processor
@@ -227,7 +263,7 @@ namespace vessl
 
     void write(const T& v);
     size_t getWriteIndex() const { return head - array<T>::data; }
-    void setWriteIndex(size_t index) { head = array<T>::data + index; }
+    void setWriteIndex(size_t index) { head = array<T>::data + index%array<T>::size; }
 
     ring operator<<(typename array<T>::reader r);
   };
@@ -429,6 +465,12 @@ namespace vessl
     
     template<typename T>
     T epsilon() { return std::numeric_limits<T>::epsilon(); }
+
+    template<typename T>
+    T exp10(T v) { return ::exp10(v); }
+
+    template<typename T>
+    T log10(T v) { return ::log10(v); }
     
     template<typename T>
     T max(T a, T b) { return a > b ? a : b; }
@@ -472,6 +514,20 @@ namespace vessl
     inline void si32(unsigned seed) { srand(seed); }
     inline int i32() { return rand(); }
   }
+
+  template<typename T>
+  class gain
+  {
+    T value;
+  public:
+    static T decibelsToScale(T db) { return math::exp10(db*0.05);}
+    static T scaleToDecibels(T scale) { return math::log10(scale)*20.0;}
+    static gain fromScale(float scale) { return {scale}; }
+    static gain fromDecibels(float dB) { return {decibelsToScale(dB)}; }
+
+    T toScale() const { return value; }
+    T toDecibels() const { return scaleToDecibels(value); }
+  };
   
   namespace easing
   {
@@ -1090,6 +1146,16 @@ namespace vessl
   }
 
   template<typename T>
+  void array<T>::fill(T value)
+  {
+    writer w (*this);
+    while (w)
+    {
+      w << value;
+    }
+  }
+
+  template<typename T>
   array<T> array<T>::add(array other, array dest)
   {
     VASSERT(size == other.size && size <= dest.size, "arrays are have different lengths or destination is too small");
@@ -1562,17 +1628,9 @@ namespace vessl
 
 #ifdef ARM_CORTEX
   template<>
-  inline float math::sin(float x) { return arm_sin_f32(x); }
-
-  template<>
-  inline float math::sqrt(float x)
+  void array<float>::fill(float value)
   {
-    float out;
-    if (ARM_MATH_SUCCESS == arm_sqrt_f32(x, &out))
-    {
-      return out;
-    }
-    return 0;
+    arm_fill_f32(value, data, size);  
   }
   
   template<>
@@ -1589,6 +1647,20 @@ namespace vessl
     assert(size <= dest.size);
     arm_scale_f32(data, value, dest.data, size);
     return dest;
+  }
+  
+  template<>
+  inline float math::sin(float x) { return arm_sin_f32(x); }
+
+  template<>
+  inline float math::sqrt(float x)
+  {
+    float out;
+    if (ARM_MATH_SUCCESS == arm_sqrt_f32(x, &out))
+    {
+      return out;
+    }
+    return 0;
   }
 #endif
 }

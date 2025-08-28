@@ -560,12 +560,27 @@ namespace vessl
       };
     }
 
-    template<typename T, typename E = linear>
+    // easing is first parameter so T can be deduced
+    template<typename E, typename T>
     T interp(T begin, T end, float t)
     {
       static E ease;
       return (end-begin) * ease(t) + begin;
     }
+
+    template<typename T>
+    T lerp(T begin, T end, float t) { return interp<linear, T>(begin, end, t); }
+  }
+
+  namespace saturation
+  {
+    // lovingly borrowed from pichenettes/stmlib
+    template<typename T>
+    T softlimit(T x) { return x * (27 + x * x) / (27 + 9 * x * x); }
+
+    // lovingly borrowed from pichenettes/stmlib
+    template<typename T>
+    T softclip(T x) { return x < -3 ? -1 : (x > 3 ? 1 : softlimit(x)); }
   }
   
   struct time
@@ -996,12 +1011,12 @@ namespace vessl
       }
     };
   public:
-    explicit smoother(float initialValue, float smoothingDegree = 0.9f) : unitProcessor<T>(init), value(initialValue)
+    explicit smoother(float smoothingDegree = 0.9f, T initialValue = T(0)) : unitProcessor<T>(init), value(initialValue)
     { degree() << smoothingDegree; }
 
     parameter& degree() { return init.params[0]; }
 
-    T process(const T& v) override { return value = easing::interp(v, value, math::constrain(*degree(), 0.f, 1.f)); }
+    T process(const T& v) override { return value = easing::lerp(v, value, math::constrain(*degree(), 0.f, 1.f)); }
     // for block processing
     using unitProcessor<T>::process;
   };
@@ -1388,7 +1403,7 @@ namespace vessl
         static T prev = 0;
         float alpha = dt / (dt + RC);
         T white = 2 * (static_cast<T>(random::i32()) / random::I32_MAX) - 1;
-        prev = easing::interp(prev, white, alpha);
+        prev = easing::lerp(prev, white, alpha);
         return prev * AC;
       }
 
@@ -1471,7 +1486,7 @@ namespace vessl
         eorw() << T(1);
       }
     }
-    return easing::interp(mFrom, mTo, lt);
+    return easing::lerp(mFrom, mTo, lt);
   }
 
   template<typename T>
@@ -1482,7 +1497,7 @@ namespace vessl
     float s = unit::dt() / math::max(*duration(), dt);
     time += s;
     float t = math::constrain(time, 0.f, 1.f);
-    mValue = easing::interp<T, E>(begin, mTarget, t);
+    mValue = easing::interp<E, T>(begin, mTarget, t);
     if (time >= 1)
     {
       aw() << false;
@@ -1614,7 +1629,7 @@ namespace vessl
   T delay<T, I>::process(const T& in)
   {
     // smooth time parameter to prevent crunchiness when it is noisy or changes by large amounts
-    mTime = easing::interp(mTime, *time(), dt() * 10);
+    mTime = easing::lerp(mTime, *time(), dt() * 10);
     // delay time in samples
     float dts = math::constrain(mTime * unit::getSampleRate(), 0.f, static_cast<float>(buffer.getSize()-1));
     float fbk = math::constrain(feedback() >> fbk, -1.f, 1.f);

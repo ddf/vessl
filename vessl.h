@@ -142,7 +142,7 @@ namespace vessl
 
     public:
       explicit reader(array source) : source<T>(), begin(source.data), head(source.data), end(source.data + source.size) {}
-      reader(T* data, size_t size) : source<T>(), begin(data), head(data), end(data + size) {}
+      reader(const T* data, size_t size) : source<T>(), begin(data), head(data), end(data + size) {}
 
       // source methods
       bool isEmpty() const override { return head == end; }
@@ -197,40 +197,41 @@ namespace vessl
 
   template<typename T>
   T* end(array<T>& arr) { return arr.end(); }
-
-  template<typename T, size_t N>
-  class frame : public array<T>
-  {
-  protected:
-    T samples[N];
-    
-  public:
-    frame() : array<T>(samples, N) { array<T>::fill(0); }
-  };
-
-  template<typename T>
-  class mono : public frame<T, 1>
-  {
-    using frame<T,1>::samples;
   
-  public:
-    T& value() { return samples[0]; }
-    const T& value() const { return samples[0]; }
-  };
-
-  template<typename T>
-  class stereo : public frame<T, 2>
+  namespace frame
   {
-    using frame<T,2>::samples;
+    template<typename T, size_t N>
+    struct channels : array<T>
+    {
+      T samples[N];
+
+      channels() : array<T>(samples, N) { array<T>::fill(0); }
+    };
+
+    template<typename T>
+    class mono : public channels<T, 1>
+    {
+      using channels<T,1>::samples;
+  
+    public:
+      T& value() { return samples[0]; }
+      const T& value() const { return samples[0]; }
+    };
+
+    template<typename T>
+    class stereo : public channels<T, 2>
+    {
+      using channels<T, 2>::samples;
+      
+    public:
+      stereo() {}
+      stereo(T l, T r) { samples[0] = l, samples[1] = r; }
     
-  public:
-    stereo() {}
-    stereo(T l, T r) { samples[0] = l, samples[1] = r; }
-    
-    T& left() { return samples[0]; }
-    const T& left() const { return samples[0]; }
-    T& right() { return samples[1]; }
-    const T& right() const { return samples[1]; }
+      T& left() { return samples[0]; }
+      const T& left() const { return samples[0]; }
+      T& right() { return samples[1]; }
+      const T& right() const { return samples[1]; }
+    };
   };
 
   template<typename T>
@@ -489,6 +490,9 @@ namespace vessl
 
     template<typename T>
     T sqrt(T x) { return ::sqrt(x); }
+
+    template<typename T>
+    T tan(T x) { return ::tan(x); }
     
     template<typename T>
     T wrap(T val, T low, T high)
@@ -572,6 +576,123 @@ namespace vessl
     T lerp(T begin, T end, float t) { return interp<linear, T>(begin, end, t); }
   }
 
+  namespace filtering
+  {
+    template<typename T>
+    struct data
+    {
+      array<T> coeff;
+      array<T> state;
+
+      data(T* coeffData, size_t coeffSize, T* stateData, size_t stateSize)
+      : coeff(coeffData, coeffSize), state(stateData, stateSize)
+      { coeff.fill(0); state.fill(0); }
+      
+      size_t getCoeffSize() const { return coeff.getSize(); }
+      size_t getStateSize() const { return state.getSize(); }
+    };
+
+    // based on https://www.earlevel.com/main/2012/11/26/biquad-c-source-code/ 
+    namespace biquad
+    {
+      template<size_t STAGES>
+      struct type
+      {
+        static constexpr size_t stages = STAGES;
+        
+        template<typename T>
+        void copy(T* coeff)
+        {
+          size_t cosz = 5;
+          array<T> src(coeff, cosz);
+          for (int i = 1; i < stages; i++)
+          {
+            array<T> dst(coeff + cosz*i, cosz);
+            dst << src;
+          }
+        }
+      };
+
+      template<size_t STAGES = 1>
+      struct lp : type<STAGES>
+      {
+        template<typename T>
+        void operator()(T* coeff, T omega, T q, size_t stages = 1)
+        {
+          T K = math::tan(omega);
+          T ralpha = 1 / (1 + K / q + K * K);
+          coeff[0] = K * K * ralpha;
+          coeff[1] = 2 * coeff[0];
+          coeff[2] = coeff[0];
+          coeff[3] = - 2 * (K * K - 1) * ralpha;
+          coeff[4] = - (1 - K / q + K * K) * ralpha;
+          // copy calculated coefficients to all stages
+          if (stages > 1)
+          {
+            type<STAGES>::copy(coeff);
+          }
+        }
+      };
+
+      template<size_t STAGES = 1>
+      struct hp : type<STAGES>
+      { 
+        template<typename T>
+        void operator()(T* coeff, T omega, T q)
+        {
+          T K = math::tan(omega);
+          T ralpha = 1 / (1 + K / q + K * K);
+          coeff[0] = 1 * ralpha;
+          coeff[1] = -2 * coeff[0];
+          coeff[2] = coeff[0];
+          coeff[3] = - 2 * (K * K - 1) * ralpha;
+          coeff[4] = - (1 - K / q + K * K) * ralpha;
+          // copy calculated coefficients to all stages
+          if (STAGES > 1)
+          {
+            type<STAGES>::copy(coeff);
+          }
+        }
+      };
+
+      template<typename T, size_t STATES, size_t STAGES>
+      struct cascade : data<T>
+      {
+      private:
+        T co[5*STAGES];
+        T st[STATES*STAGES];
+      public:
+        cascade() : data<T>(co, 5*STAGES, st, STATES*STAGES) {}
+      };
+
+      // @todo want to be able to have class... Fs in the template parameter list
+      // so that it is possible to declare df2T types that mix biquad::types
+      // e.g.: df2T<float, bp<2>, notch<2>>
+      // might need to use std::tuple to do this, by either subclassing
+      // or having calc be a tuple.
+      // we would then also need cascade to be a member, rather than directly subclassing.
+      // another possibility would be to requires STAGES in the template parameter list
+      // and then add calc and stage parameters to set.
+      // this might be nice for mixed-use because one might not want all of the Fcs to be the same.
+      template<typename T, class F>
+      struct df2T : cascade<T, 2, F::stages>
+      {
+        F calc;
+        
+        using cascade<T, 2, F::stages>::coeff;
+        using cascade<T, 2, F::stages>::state;
+        using cascade<T, 2, F::stages>::getCoeffSize;
+        using cascade<T, 2, F::stages>::getStateSize;
+        
+        void set(T omega, T q);
+
+        size_t getStageCount() const { return F::stages; }
+
+        void process(const T* source, T* dest, size_t blockSize);
+      };
+    };
+  }
+  
   namespace saturation
   {
     // lovingly borrowed from pichenettes/stmlib
@@ -1119,6 +1240,49 @@ namespace vessl
     using processor<T>::process;
   };
 
+  template<typename T, typename F>
+  class filter : public unitProcessor<T>
+  {
+    unit::init<2> init = {
+      "filter",
+      {
+        parameter("cutoff", parameter::type::analog),
+        parameter("q", parameter::type::analog)
+      }
+    };
+    
+    F function;
+    float fnorm;
+    
+    using unit::dt;
+
+  public:
+    filter(float sampleRate, float cutoffInHz, float kyu = 0) : unitProcessor<T>(init, sampleRate)
+    , fnorm(math::pi<float>()/sampleRate)
+    { cutoff() << cutoffInHz; q() << kyu; }
+
+    parameter& cutoff() { return init.params[0]; }
+    parameter& q() { return init.params[1]; }
+
+  protected:
+    void onSampleRateChanged() override { fnorm = math::pi<float>() * dt(); }
+
+  public:
+    T process(const T& in) override
+    {
+      T out;
+      function.set(*cutoff()*fnorm, *q());
+      function.process(&in, &out, 1);
+      return out;
+    }
+    
+    void process(array<T> in, array<T> out) override
+    {
+      function.set(*cutoff()*fnorm, *q());
+      function.process(in.getData(), out.getData(), in.getSize());
+    }
+  };
+
   /////////////////////////////////////////////////////////////////////////////////////////////////////
   // implementation
   //
@@ -1320,6 +1484,39 @@ namespace vessl
     float fp1 = f + 1.f;
     size_t x0 = idx;
     return -f * fm1 * fm2 * DIV6 * buffer[x0 - 1] + fp1 * fm1 * fm2 * DIV2 * buffer[x0] - fp1 * f * fm2 * DIV2 * buffer[x0 + 1] + fp1 * f * fm1 * DIV6 * buffer[x0 + 2];
+  }
+  
+  template<typename T, typename F>
+  void filtering::biquad::df2T<T, F>::set(T omega, T q)
+  {
+    calc(coeff.getData(), omega, q);
+  }
+  
+  template<typename T, typename F>
+  void filtering::biquad::df2T<T, F>::process(const T* source, T* dest, size_t blockSize)
+  {
+    const T* input = source;
+    typename array<T>::reader cor(coeff, getCoeffSize());
+    for (size_t s = 0; s < getStageCount(); s++)
+    {
+      T b0 = cor.read();  T b1 = cor.read(); T b2 = cor.read();
+      T a1 = cor.read();  T a2 = cor.read();
+      T* st = state + 2*s;
+      T d1 = st[0]; T d2 = st[1];
+      typename array<T>::reader r(input, blockSize);
+      typename array<T>::writer w(dest, blockSize);
+      while (r)
+      {
+        T xn = r.read();
+        T yn = b0 * xn + d1;
+        d1 = b1 * xn + a1 * yn + d2;
+        d2 = b2 * xn + a2 * yn;
+        w << yn;
+      }
+      st[0] = d1;
+      st[1] = d2;
+      input = dest;
+    }
   }
 
   template<typename T, size_t N, typename I>
@@ -1677,5 +1874,31 @@ namespace vessl
     }
     return 0;
   }
+  
+  template<typename F>
+  struct filtering::biquad::df2T<float, F> : cascade<float, 2, F::stages>
+  {
+    F calc;
+    arm_biquad_cascade_df2T_instance_f32 inst;
+          
+    using cascade<float, 2, F::stages>::coeff;
+    using cascade<float, 2, F::stages>::state;
+    using cascade<float, 2, F::stages>::getCoeffSize;
+    using cascade<float, 2, F::stages>::getStateSize;
+
+    df2T() { arm_biquad_cascade_df2T_init_f32(&inst, getStageCount(), coeff.getData(), state.getData()); }
+          
+    void set(float omega, float q)
+    {
+      calc(coeff.getData(), omega, q);
+    }
+
+    size_t getStageCount() const { return F::stages; }
+
+    void process(const float* source, float* dest, size_t blockSize)
+    {
+      arm_biquad_cascade_df2T_f32(&inst, source, dest, blockSize);
+    }
+  };
 #endif
 }

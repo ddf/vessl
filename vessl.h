@@ -301,6 +301,19 @@ namespace vessl
     // set the state of a binary parameter with a sample delay
     parameter& write(bool gate, uint32_t sampleDelay);
 
+    parameter& operator<<(const parameter& rhs)
+    {
+      switch (rhs.pt)
+      {
+        case type::binary: this->write(rhs.pv.b); break;
+        case type::digital: this->write(rhs.pv.i); break;
+        case type::analog: this->write(rhs.pv.a); break;
+        case type::user: VASSERT(false, "Can't copy a user parameter without knowing the type!"); break;
+      }
+
+      return *this;
+    }
+
     // overloading dereference with float conversion because it will be used so often
     float operator*() const { return read<float>(); }
     explicit operator bool() const { return read<bool>(); }

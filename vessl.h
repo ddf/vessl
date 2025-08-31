@@ -1252,35 +1252,34 @@ namespace vessl
     };
     
     F function;
-    float fnorm;
+    float piosr;
     
     using unit::dt;
 
   public:
     filter(float sampleRate, float cutoffInHz, float kyu = 0) : unitProcessor<T>(init, sampleRate)
-    , fnorm(math::pi<float>()/sampleRate)
+    , piosr(math::pi<float>()/sampleRate)
     { cutoff() << cutoffInHz; q() << kyu; }
 
     parameter& cutoff() { return init.params[0]; }
     parameter& q() { return init.params[1]; }
-
-  protected:
-    void onSampleRateChanged() override { fnorm = math::pi<float>() * dt(); }
-
-  public:
+    
     T process(const T& in) override
     {
       T out;
-      function.set(*cutoff()*fnorm, *q());
+      function.set(*cutoff()*piosr, *q());
       function.process(&in, &out, 1);
       return out;
     }
     
     void process(array<T> in, array<T> out) override
     {
-      function.set(*cutoff()*fnorm, *q());
+      function.set(*cutoff()*piosr, *q());
       function.process(in.getData(), out.getData(), in.getSize());
     }
+
+  protected:
+    void onSampleRateChanged() override { piosr = math::pi<float>() * dt(); }
   };
 
   /////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1843,6 +1842,14 @@ namespace vessl
   void array<float>::fill(float value)
   {
     arm_fill_f32(value, data, size);  
+  }
+
+  template<>
+  array<float> array<float>::operator<<(array copyFrom)
+  {
+    VASSERT(this->getSize() >= copyFrom.getSize(), "Not enough room in this array for contents of copyFrom");
+    arm_copy_f32(copyFrom.getData(), this->getData(), copyFrom.getSize());
+    return *this;
   }
   
   template<>

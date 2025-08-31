@@ -1124,20 +1124,22 @@ namespace vessl
   template<typename T>
   class smoother : public unitProcessor<T>
   {
-    T value;
-    unit::init<1> init = {
+    T mValue;
+    unit::init<2> init = {
       "smoother",
       {
         parameter("degree", parameter::type::analog),
+        parameter("value", &mValue)
       }
     };
   public:
-    explicit smoother(float smoothingDegree = 0.9f, T initialValue = T(0)) : unitProcessor<T>(init), value(initialValue)
+    explicit smoother(float smoothingDegree = 0.9f, T initialValue = T(0)) : unitProcessor<T>(init), mValue(initialValue)
     { degree() << smoothingDegree; }
 
     parameter& degree() { return init.params[0]; }
+    const parameter& value() const { return init.params[1]; }
 
-    T process(const T& v) override { return value = easing::lerp(v, value, math::constrain(*degree(), 0.f, 1.f)); }
+    T process(const T& v) override { return mValue = easing::lerp(v, mValue, math::constrain(*degree(), 0.f, 1.f)); }
     // for block processing
     using unitProcessor<T>::process;
   };

@@ -1297,6 +1297,60 @@ namespace vessl
     void onSampleRateChanged() override { piosr = math::pi<float>() * dt(); }
   };
 
+  // designed to work with floating point types.
+  template<typename T, uint32_t MaxBits>
+  class bitcrush : public unitProcessor<T>
+  {
+    unit::init<3> init = {
+      "bit crush",
+      {
+        parameter("bit rate", parameter::type::analog),
+        parameter("bit depth", parameter::type::analog),
+        parameter("mangle", parameter::type::binary)
+      }
+    };
+    
+    T prevInput;
+    T currSample;
+    T rateAlpha;
+
+    using unit::dt;
+
+  public:
+    bitcrush(float sampleRate, float bitRate, float bitDepth = MaxBits)
+      : unitProcessor<T>(init, sampleRate), prevInput(0), currSample(0), rateAlpha(0)
+    {
+      rate() << bitRate;
+      depth() << bitDepth;
+    }
+
+    parameter& rate() { return init.params[0]; }
+    parameter& depth() { return init.params[1]; }
+    parameter& mangle() { return init.params[2]; }
+
+    T process(const T& in) override
+    {
+      rateAlpha += math::max(1.0f, *rate())*dt();
+      if (rateAlpha >= 1)
+      {
+        rateAlpha -= 1;
+        currSample = easing::lerp(prevInput, in, rateAlpha);
+      }
+
+      float bd = math::constrain<float>(*depth(), 2.0f, MaxBits);
+      float scalar = math::pow(2.f, bd) - 1;
+      int val = currSample*scalar;
+      if (mangle().template read<bool>())
+      {
+        val ^= static_cast<int>(prevInput*scalar);
+      }
+      prevInput = in;
+      return static_cast<float>(val) / scalar;
+    }
+
+    using unitProcessor<T>::process;
+  };
+
   /////////////////////////////////////////////////////////////////////////////////////////////////////
   // implementation
   //

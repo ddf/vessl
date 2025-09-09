@@ -459,7 +459,7 @@ namespace vessl
     };
     
     template<typename T, typename I = linear<T>>
-    T sample(const T* buffer, float fracIdx)
+    T sample(const T* buffer, analog_t fracIdx)
     {
       VASSERT(fracIdx >= 0, "fracIdx argument to sample must be non-negative");
       static I interpolator;
@@ -773,9 +773,9 @@ namespace vessl
     period_t periodMin;
     period_t periodMax;
     period_t ticks;
-    float    sampleRate;
+    analog_t sampleRate;
 
-    clockable(float sampleRate, period_t samplePeriodMin, period_t samplePeriodMax, float bpm = 60)
+    clockable(analog_t sampleRate, period_t samplePeriodMin, period_t samplePeriodMax, analog_t bpm = 60)
     : tempo(duration::fromBpm(bpm, sampleRate)), periodMin(samplePeriodMin), periodMax(samplePeriodMax)
     , ticks(0), sampleRate(sampleRate)
     {}
@@ -795,10 +795,10 @@ namespace vessl
     clockable& operator=(clockable&&) = default
     ;
     // users should call clock at the beginning of every clock pulse
-    void clock() { tempo.samples = math::constrain(ticks, periodMin, periodMax); ticks = 0; tock(0); }
-    void clock(period_t sampleDelay) { tempo.samples = math::constrain<double>(ticks + sampleDelay, periodMin, periodMax); ticks = 0; tock(sampleDelay); }
+    void clock();
+    void clock(period_t sampleDelay);
 
-    float getBpm() const { return tempo.toBpm(sampleRate); }
+    analog_t getBpm() const { return tempo.toBpm(sampleRate); }
   };
   
   // a waveform that can be evaluated using a normalized phase value
@@ -871,13 +871,13 @@ namespace vessl
         parameter("rate", parameter::type::analog)
       }
     };
-    float step;
+    analog_t step;
     T nz[2];
 
     using unit::dt;
 
   public:
-    explicit noiseGenerator(float sampleRate, noiseTint withTint = noiseTint::white)
+    explicit noiseGenerator(analog_t sampleRate, noiseTint withTint = noiseTint::white)
     : unitGenerator<T>(init, sampleRate), step(0)
     {
       nz[0] = nz[1] = next(withTint, 0);
@@ -970,7 +970,7 @@ namespace vessl
 
       T begin; // value the stage started with
       // where we are in the stage
-      float time;
+      analog_t time;
       parameter& aw() { return init.params[2]; }
       parameter& ew() { return init.params[3]; }
       
@@ -978,7 +978,7 @@ namespace vessl
       T step();
 
     public:
-      explicit stage(float sampleRate) : unitGenerator<T>(init, sampleRate), mTarget(0), begin(0) { reset(); }
+      explicit stage(analog_t sampleRate) : unitGenerator<T>(init, sampleRate), mTarget(0), begin(0) { reset(); }
 
       parameter& target() { return init.params[0]; }
       parameter& duration() { return init.params[1]; }
@@ -1008,13 +1008,13 @@ namespace vessl
     parameter& eocw() { return init.params[0]; }
 
   protected:
-    envelope(stage* stages, int stageCount, float sampleRate) : unitGenerator<T>(init, sampleRate)
+    envelope(stage* stages, size_t stageCount, analog_t sampleRate) : unitGenerator<T>(init, sampleRate)
     , stages(stages, stageCount), stageIdx(0), final(sampleRate) {}
     
   public:
     stage& getStage(size_t idx) { return idx == stages.getSize() ? final : stages[idx]; }
     const stage& getStage(size_t idx) const { return idx == stages.getSize() ? final : stages[idx]; }
-    int getStageCount() const { return stages.size() + 1; }
+    size_t getStageCount() const { return stages.size() + 1; }
 
     stage& currentStage() { return getStage(stageIdx); }
     const stage& currentStage() const { return getStage(stageIdx);}
@@ -1033,13 +1033,13 @@ namespace vessl
 
   protected:
     void onSampleRateChanged() override;
-    void startStage(int idx, T fromValue) { getStage(idx).start(fromValue); stageIdx = idx; }
+    void startStage(size_t idx, T fromValue) { getStage(idx).start(fromValue); stageIdx = idx; }
     
     // by default, stages advance automatically when their eos goes high.
     // subclasses can override this behavior per stage
     // to enable advancing to the next stage before it is finished,
     // or holding a stage for some period of time.
-    virtual bool shouldAdvance(size_t currentStageIdx) { return getStage(currentStageIdx).eos().template read<bool>(); }
+    virtual binary_t shouldAdvance(size_t currentStageIdx) { return getStage(currentStageIdx).eos().template read<bool>(); }
   };
 
   template<typename T>
@@ -1048,7 +1048,7 @@ namespace vessl
     typename envelope<T>::stage attackStage;
 
   public:
-    ad(float attackDuration, float decayDuration, float sampleRate) : envelope<T>(&attackStage, 1, sampleRate), attackStage(sampleRate)
+    ad(analog_t attackDuration, analog_t decayDuration, analog_t sampleRate) : envelope<T>(&attackStage, 1, sampleRate), attackStage(sampleRate)
     { attack().target() << T(1); attack().duration() << attackDuration; decay().duration() << decayDuration; }
 
     typename envelope<T>::stage& attack() { return attackStage; }
@@ -1063,10 +1063,10 @@ namespace vessl
   class asr : public ad<T>
   {
     T triggerThreshold;
-    bool gateOn;
+    binary_t gateOn;
     
   public:
-    asr(float attackDuration, float decayDuration, float sampleRate, T triggerThreshold = T(0))
+    asr(analog_t attackDuration, analog_t decayDuration, analog_t sampleRate, T triggerThreshold = T(0))
     : ad<T>(attackDuration, decayDuration, sampleRate), triggerThreshold(triggerThreshold), gateOn(false) {}
 
     using ad<T>::attack;
@@ -1074,12 +1074,12 @@ namespace vessl
     using ad<T>::eoc; 
 
     void gate(T value);
-    void gate(bool on) { gate(on ? T(1) : T(0));}
+    void gate(binary_t on) { gate(on ? T(1) : T(0));}
     void trigger() override { attack().target() << T(1); ad<T>::trigger(); gateOn = false; }
     using envelope<T>::generate;
 
   protected:
-    bool shouldAdvance(size_t currentStageIdx) override { return ad<T>::shouldAdvance(currentStageIdx) && !gateOn; }
+    binary_t shouldAdvance(size_t currentStageIdx) override { return ad<T>::shouldAdvance(currentStageIdx) && !gateOn; }
   };
 
   template<typename T>
@@ -1087,10 +1087,10 @@ namespace vessl
   {
     typename envelope<T>::stage attackStage;
     typename envelope<T>::stage decayStage;
-    bool gateOn;
+    binary_t gateOn;
 
   public:
-    adsr(float attackDuration, float decayDuration, float sustainLevel, float releaseDuration, float sampleRate)
+    adsr(analog_t attackDuration, analog_t decayDuration, analog_t sustainLevel, analog_t releaseDuration, analog_t sampleRate)
     : envelope<T>(&attackStage, 2, sampleRate), attackStage(sampleRate), decayStage(sampleRate), gateOn(false)
     {
       attackStage.duration() << attackDuration;
@@ -1107,7 +1107,7 @@ namespace vessl
     using envelope<T>::eoc;
 
     // should we jump to the release stage if the gate goes off before we start sustaining??
-    void gate(bool on)
+    void gate(binary_t on)
     {
       if (on && !gateOn)
       {
@@ -1123,7 +1123,7 @@ namespace vessl
     using envelope<T>::generate;
 
   protected:
-    bool shouldAdvance(size_t currentStageIdx) override
+    binary_t shouldAdvance(size_t currentStageIdx) override
     {
       return currentStageIdx == 1 ? decayStage.eos() && !gateOn : envelope<T>::shouldAdvance(currentStageIdx);
     }
@@ -1154,7 +1154,7 @@ namespace vessl
   public:
     // note: choice of epsilon will depend on the amount of noise in the signal to be slewed.
     // the default value was chosen based on testing with an OWL module's audio input.
-    slew(float sampleRate, float riseRate, float fallRate, T initialValue = T(0), T epsilon = math::epsilon<T>()*1000)
+    slew(analog_t sampleRate, analog_t riseRate, analog_t fallRate, T initialValue = T(0), T epsilon = math::epsilon<T>()*1000)
     : unitProcessor<T>(init, sampleRate), value(initialValue), epsilon(epsilon)
     { rise() << riseRate; fall() << fallRate; }
 
@@ -1180,7 +1180,7 @@ namespace vessl
       }
     };
   public:
-    explicit smoother(analog_t smoothingDegree = 0.9, T initialValue = T(0)) : unitProcessor<T>(init), mValue(initialValue)
+    explicit smoother(analog_t smoothingDegree = 0.9, T initialValue = T(0)) : unitProcessor<T>(init), mValue(initialValue)  // NOLINT(clang-diagnostic-implicit-float-conversion)
     { degree() << smoothingDegree; }
 
     parameter& degree() { return init.params[0]; }
@@ -1311,13 +1311,13 @@ namespace vessl
     };
     
     F function;
-    float piosr;
+    analog_t piosr;
     
     using unit::dt;
 
   public:
-    filter(float sampleRate, float cutoffInHz, float kyu = 0) : unitProcessor<T>(init, sampleRate)
-    , piosr(math::pi<float>()/sampleRate)
+    filter(analog_t sampleRate, analog_t cutoffInHz, analog_t kyu = 0) : unitProcessor<T>(init, sampleRate)
+    , piosr(math::pi<analog_t>()/sampleRate)
     { cutoff() << cutoffInHz; q() << kyu; }
 
     parameter& cutoff() { return init.params[0]; }
@@ -1338,7 +1338,7 @@ namespace vessl
     }
 
   protected:
-    void onSampleRateChanged() override { piosr = math::pi<float>() * dt(); }
+    void onSampleRateChanged() override { piosr = math::pi<analog_t>() * dt(); }
   };
 
   // designed to work with floating point types.
@@ -1361,36 +1361,15 @@ namespace vessl
     using unit::dt;
 
   public:
-    bitcrush(float sampleRate, float bitRate, float bitDepth = MaxBits)
+    bitcrush(analog_t sampleRate, analog_t bitRate, analog_t bitDepth = MaxBits)
       : unitProcessor<T>(init, sampleRate), prevInput(0), currSample(0), rateAlpha(0)
-    {
-      rate() << bitRate;
-      depth() << bitDepth;
-    }
+    { rate() << bitRate; depth() << bitDepth; }
 
     parameter& rate() { return init.params[0]; }
     parameter& depth() { return init.params[1]; }
     parameter& mangle() { return init.params[2]; }
 
-    T process(const T& in) override
-    {
-      rateAlpha += math::max(1.0f, *rate())*dt();
-      if (rateAlpha >= 1)
-      {
-        rateAlpha -= 1;
-        currSample = easing::lerp(prevInput, in, rateAlpha);
-      }
-
-      float bd = math::constrain<float>(*depth(), 2.0f, MaxBits);
-      float scalar = math::pow(2.f, bd) - 1;
-      int val = currSample*scalar;
-      if (mangle().template read<bool>())
-      {
-        val ^= static_cast<int>(prevInput*scalar);
-      }
-      prevInput = in;
-      return static_cast<float>(val) / scalar;
-    }
+    T process(const T& in) override;
 
     using unitProcessor<T>::process;
   };
@@ -1573,6 +1552,20 @@ namespace vessl
     onSampleRateChanged();
   }
 
+  inline void clockable::clock()
+  {
+    tempo.samples = static_cast<analog_t>(math::constrain(ticks, periodMin, periodMax));
+    ticks = 0;
+    tock(0);
+  }
+
+  inline void clockable::clock(period_t sampleDelay)
+  {
+    tempo.samples = static_cast<analog_t>(math::constrain(ticks + sampleDelay, periodMin, periodMax));
+    ticks = 0;
+    tock(sampleDelay);
+  }
+
   template<typename T>
   T interpolation::nearest<T>::operator()(const T* buffer, analog_t fracIdx)
   {
@@ -1654,8 +1647,8 @@ namespace vessl
   template<typename T, size_t N, typename I>
   wavetable<T, N, I>::wavetable(const waveform<T>& waveform): waveform<T>()
   {
-    float phase = 0;
-    float step = 1.0f / N;
+    analog_t phase = 0;
+    analog_t step = 1.0 / N;
     for (size_t i = 0; i < N; ++i)
     {
       buffer[i + 1] = waveform.evaluate(phase);
@@ -1715,7 +1708,7 @@ namespace vessl
         static const T RC = static_cast<T>(1) / (math::pi<T> * 200);
         static const T AC = 6.2;
         static T prev = 0;
-        float alpha = dt / (dt + RC);
+        analog_t alpha = dt / (dt + RC);
         T white = 2 * (static_cast<T>(random::i32()) / random::I32_MAX) - 1;
         prev = easing::lerp(prev, white, alpha);
         return prev * AC;
@@ -1760,7 +1753,7 @@ namespace vessl
   T noiseGenerator<T>::generate()
   {
     step += dt() * rate().read();
-    float alpha = step / dt();
+    analog_t alpha = step / dt();
     if (alpha >= 1)
     {
       noiseTint tnt = static_cast<noiseTint>(tint());
@@ -1807,10 +1800,10 @@ namespace vessl
   template<typename E>
   T envelope<T>::stage::step()
   {
-    float dt = unit::dt();
-    float s = unit::dt() / math::max(*duration(), dt);
+    analog_t dt = unit::dt();
+    analog_t s = unit::dt() / math::max<analog_t>(*duration(), dt);
     time += s;
-    float t = math::constrain(time, 0.f, 1.f);
+    analog_t t = math::constrain<analog_t>(time, 0.0, 1.0);
     mValue = easing::interp<E, T>(begin, mTarget, t);
     if (time >= 1)
     {
@@ -1862,7 +1855,7 @@ namespace vessl
   template<typename T>
   void asr<T>::gate(T value)
   {
-    bool valueOn = value > triggerThreshold;
+    binary_t valueOn = value > triggerThreshold;
     T attackTarget = attack().target().template read<T>();
     if (!gateOn && valueOn)
     {
@@ -1886,9 +1879,9 @@ namespace vessl
   template<typename T>
   T slew<T>::process(const T& v)
   {
-    bool isRise = v > value+epsilon;
-    bool isFall = v < value-epsilon;
-    float rate = isRise ? *rise() : isFall ? -1.0f*fall() : (v-value)*getSampleRate();
+    binary_t isRise = v > value+epsilon;
+    binary_t isFall = v < value-epsilon;
+    analog_t rate = isRise ? *rise() : isFall ? -1.0f*fall() : (v-value)*getSampleRate();
     value += rate*dt();
     rw() << isRise;
     fw() << isFall;
@@ -1984,6 +1977,27 @@ namespace vessl
     {
       processor<T>::process(in, out);
     }
+  }
+
+  template<typename T, uint32_t MaxBits>
+  T bitcrush<T, MaxBits>::process(const T& in)
+  {
+    rateAlpha += math::max(1.0f, *rate())*dt();
+    if (rateAlpha >= 1)
+    {
+      rateAlpha -= 1;
+      currSample = easing::lerp(prevInput, in, rateAlpha);
+    }
+
+    analog_t bd = math::constrain<analog_t>(*depth(), 2.0, MaxBits);
+    analog_t scalar = math::pow<analog_t>(2.0, bd) - 1;
+    digital_t val = currSample*scalar;
+    if (mangle().template read<bool>())
+    {
+      val ^= static_cast<digital_t>(prevInput*scalar);
+    }
+    prevInput = in;
+    return static_cast<analog_t>(val) / scalar;
   }
 
   template<>

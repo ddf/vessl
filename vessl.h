@@ -1299,7 +1299,7 @@ namespace vessl
 
     // @todo handle all three modes correctly (see: freeze)
     template<duration::mode TimeMode = duration::mode::slew>
-    void process(array<T> in, array<T> out);
+    void process(array<T> input, array<T> output);
   };
   
   // when used as a processor, will write incoming audio to the delayline
@@ -2108,8 +2108,7 @@ namespace vessl
   template<typename T, typename I>
   T delay<T, I>::process(const T& in)
   {
-    // smooth time parameter to prevent crunchiness when it is noisy or changes by large amounts
-    mDelayInSamples = easing::lerp<float>(mDelayInSamples, mTime.samples, dt() * 10);
+    mDelayInSamples = mTime.samples;
     // delay time in samples
     analog_t dts = math::constrain<analog_t>(mDelayInSamples, 0.f, static_cast<analog_t>(buffer.getSize()-1));
     analog_t s = buffer.template read<I>(dts);
@@ -2120,34 +2119,55 @@ namespace vessl
 
   template<typename T, typename I>
   template<duration::mode TimeMode>
-  void delay<T, I>::process(array<T> in, array<T> out)
+  void delay<T, I>::process(array<T> input, array<T> output)
   {
+    if (TimeMode == duration::mode::snap)
+    {
+      processor<T>::process(input, output);
+    }
+
+    if (TimeMode == duration::mode::slew)
+    {
+      typename array<T>::reader r = input.getReader();
+      typename array<T>::writer w = output.getWriter();
+      analog_t dst = dt() * 10.0f;
+      while (r && w)
+      {
+        T in = r.read();
+        mDelayInSamples = easing::lerp(mDelayInSamples, mTime.samples, dst);
+        // delay time in samples
+        analog_t dts = math::constrain<analog_t>(mDelayInSamples, 0.f, static_cast<analog_t>(buffer.getSize()-1));
+        analog_t wet = buffer.template read<I>(dts);
+        analog_t fbk = math::constrain<analog_t>(*feedback(), -1.0, 1.0);
+        buffer.write(in + wet*fbk);
+        w << wet;
+      }
+    }
+    
     if (TimeMode == duration::mode::fade)
     {
+      typename array<T>::reader r = input.getReader();
+      typename array<T>::writer w = output.getWriter();
+      
       analog_t fade = 0;
-      analog_t fadeInc = 1.0f / in.getSize();
+      analog_t fadeInc = 1.0f / input.getSize();
       // smooth time parameter to prevent crunchiness when it is noisy or changes by large amounts
-      analog_t targetSampleDelay = easing::lerp<analog_t>(mDelayInSamples, mTime.samples, dt() * 10);
+      analog_t targetSampleDelay = mTime.samples;
       // delay time in samples
       analog_t fts = math::constrain<analog_t>(mDelayInSamples, 0.0, static_cast<analog_t>(buffer.getSize()-1));
       analog_t tts = math::constrain<analog_t>(targetSampleDelay, 0.0, static_cast<analog_t>(buffer.getSize()-1));
       analog_t fbk = math::constrain<analog_t>(*feedback(), -1.0, 1.0);
-
-      typename array<T>::reader r = in.getReader();
-      typename array<T>::writer w = out.getWriter();
-      while (r)
+      
+      while (r && w)
       {
-        float wet = (1.0f - fade) * buffer.template read<I>(fts) + fade * buffer.template read<I>(tts);
-        buffer.write(r.read() + wet*fbk);
+        T in = r.read();
+        T wet = (1.0f - fade) * buffer.template read<I>(fts) + fade * buffer.template read<I>(tts);
+        buffer.write(in + wet*fbk);
         w << wet;
         fade += fadeInc;
       }
         
       mDelayInSamples = targetSampleDelay;
-    }
-    else
-    {
-      processor<T>::process(in, out);
     }
   }
 

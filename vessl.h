@@ -301,8 +301,18 @@ namespace vessl
     template<typename T>
     T read() const;
 
-    // read the state of a binary parameter, including sample delay
+    binary_t readBinary() const { return read<binary_t>(); }
+    explicit operator binary_t() const { return read<binary_t>(); }
+    
+    // read the actual state of a binary parameter, including sample delay
+    // @todo rename to readBinaryRaw
     binary_t read(uint32_t* sampleDelay) const;
+
+    digital_t readDigital() const { return read<digital_t>(); }
+    analog_t readAnalog() const { return read<analog_t>(); }
+
+    // overloading dereference with analog conversion because it will be used so often
+    analog_t operator*() const { return read<analog_t>(); }
 
     template<typename T>
     parameter& write(const T& value);
@@ -322,10 +332,6 @@ namespace vessl
 
       return *this;
     }
-
-    // overloading dereference with analog conversion because it will be used so often
-    analog_t operator*() const { return read<analog_t>(); }
-    explicit operator binary_t() const { return read<binary_t>(); }
 
   private:
     const char_t* pn;
@@ -741,17 +747,19 @@ namespace vessl
     static constexpr analog_t B2F = 1.0 / 60.0;
     static constexpr analog_t F2B = 60;
 
-    // can be used by units an indication for how to treat changes in time values (see: delay)
+    // can be used by units an indication for how to treat changes in time values (see: delay & fr)
     enum class mode : uint8_t
     {
-      lerp,
-      crossfade,
+      snap, // use duration value directly
+      slew, // smooth duration when it changes
+      fade, // crossfade to new duration across a block of samples
     };
 
     analog_t samples; // analog so we can express subsample periods.
 
     // conversions for parameter
     explicit duration(binary_t b) : samples(b) {}
+    explicit duration(size_t s): samples(static_cast<analog_t>(s)) {}
     explicit duration(digital_t i) : samples(static_cast<analog_t>(i)) {}
     explicit duration(analog_t a) : samples(a) {}
     explicit operator binary_t() const { return math::abs(samples) >= math::epsilon<analog_t>(); }
@@ -1211,14 +1219,7 @@ namespace vessl
   public:
     explicit oscil(analog_t sampleRate, waveform<T>& wave, analog_t freqInHz = 440)
     : unitGenerator<T>(init, sampleRate), wave(&wave), phase(0)
-    {
-      fHz() << freqInHz;
-    }
-    ~oscil() override = default;
-    oscil(const oscil&) = default;
-    oscil(oscil&&) = default;
-    oscil& operator=(const oscil&) = default;
-    oscil& operator=(oscil&&) = default;
+    { fHz() << freqInHz; }
 
     // frequency in Hz without FM applied
     parameter& fHz() { return init.params[0]; }
@@ -1286,17 +1287,188 @@ namespace vessl
       feedback() << feedbackAmount;
     }
 
-    /// delay time expressed as vessl::time (i.e. samples), can be set using a double
+    /// delay time expressed as vessl::time (i.e. samples), can be set using an analog_t
     parameter& time() { return init.params[0]; }
     /// amount of signal to feedback, can be negative to invert feedback signal, clamped [-1,1]
     parameter& feedback() { return init.params[1]; }
 
+    // @todo remove parameter smoothing from this
     T process(const T& in) override;
 
     void process(source<T>& source, sink<T>& sink) override { processor<T>::process(source, sink); }
-    
-    template<duration::mode TimeMode = duration::mode::lerp>
+
+    // @todo handle all three modes correctly (see: freeze)
+    template<duration::mode TimeMode = duration::mode::slew>
     void process(array<T> in, array<T> out);
+  };
+  
+  // when used as a processor, will write incoming audio to the delayline
+  // and output the incoming signal if freeze is not engaged.
+  // when freeze is engaged, it will ignore the incoming signal
+  // and generate audio from previously recorded input.
+  //
+  // when used as a generator, it will always generate using the
+  // contents of the delayline, enabling it to be used to "freeze"
+  // audio that has been recorded elsewhere (e.g. by a delay).
+  template<typename T, typename I = interpolation::linear<T>>
+  class freeze : public unit, public processor<T>, public generator<T>
+  {
+    delayline<T>* buffer;
+    duration mSize;
+    analog_t phase;
+    smoother<analog_t> crossfade; // used to crossfade between the incoming signal and the freeze signal when enabled changes.
+    analog_t freezeDelay, freezeSize, readRate;
+
+    init<4> init = {
+      "freeze",
+      {
+        parameter("enabled", parameter::type::binary),
+        // end of the freeze loop in samples relative to the most recently recorded sample
+        parameter("position", parameter::type::analog),
+        // size of the freeze loop as a duration (samples).
+        // the beginning of the freeze loop, when played forward,
+        // will be position + size.
+        parameter("size", &mSize),
+        // rate of playback when enabled, can be negative to play in reverse
+        parameter("rate", parameter::type::analog)
+      }
+    };
+
+  public:
+    freeze(delayline<T>* buffer, analog_t sampleRate) : unit(init, sampleRate), buffer(buffer)
+    , mSize(buffer->getSize()-1), phase(0), crossfade(0.75f), freezeDelay(0), freezeSize(mSize.samples), readRate(1)
+    { rate() << 1.0; }
+
+    parameter& enabled() { return init.params[0]; }
+    parameter& position() { return init.params[1]; }
+    parameter& size() { return init.params[2]; }
+    parameter& rate() { return init.params[3]; }
+
+    T generate() override
+    {
+      freezeDelay = *position();
+      freezeSize  = mSize.samples;
+      analog_t sampleDelay = freezeDelay + (1.0-phase)*freezeSize;
+      phase = math::wrap01(phase + *rate() / freezeSize);
+      return buffer->template read<I>(sampleDelay);
+    }
+    
+    T process(const T& in) override
+    {
+      binary_t isEnabled = static_cast<binary_t>(enabled());
+      analog_t wetLevel = crossfade.process(isEnabled ? 1.0 : 0.0);
+      T wet = generate();
+      if (!isEnabled)
+      {
+        buffer->write(in);
+      }
+      return wetLevel*wet + (1.0 - wetLevel)*in;
+    }
+
+    void process(source<T>& source, sink<T>& sink) override { processor<T>::process(source, sink); }
+    
+    template<duration::mode TimeMode = duration::mode::slew>
+    void generate(array<T> output) { procgen<TimeMode, false>(output, output); }
+
+    template<duration::mode TimeMode = duration::mode::slew>
+    void process(array<T> input, array<T> output) { procgen<TimeMode, true>(input, output); }
+
+  private:
+    // shared routine used by templated processing and generation methods
+    template<duration::mode TimeMode, bool UseInput>
+    void procgen(array<T> input, array<T> output)
+    {
+      typename array<T>::reader r = input.getReader();
+      typename array<T>::writer w = output.getWriter();
+
+      if (TimeMode == duration::mode::snap)
+      {
+        if (UseInput)
+        {
+          while (w)
+          {
+            w << process(r.read());
+          }
+        }
+        else
+        {
+          while (w)
+          {
+            w << generate();
+          }
+        }
+      }
+
+      if (TimeMode == duration::mode::slew)
+      {
+        analog_t fd = *position();
+        analog_t fs = mSize.samples;
+        analog_t rt = *rate();
+        analog_t st = dt();
+        while (w)
+        {
+          freezeDelay = easing::lerp<analog_t>(freezeDelay, fd, st*20);
+          freezeSize = easing::lerp<analog_t>(freezeSize, fs, st*20);
+          readRate = easing::lerp<analog_t>(readRate, rt, st*10);
+          analog_t sampleDelay = freezeDelay + (1.0 - phase)*freezeSize;
+          phase = math::wrap01(phase + readRate/freezeSize);
+          T wet = buffer->template read<I>(sampleDelay);
+
+          if (UseInput)
+          {
+            binary_t isEnabled = enabled().readBinary();
+            analog_t wetLevel = crossfade.process(isEnabled ? 1.0 : 0.0);
+            T in = r.read();
+            if (!isEnabled)
+            {
+              buffer->write(in);
+            }
+            w << wetLevel*wet + (1.0 - wetLevel)*in;
+          }
+          else
+          {
+            w << wet;
+          }
+        }
+      }
+
+      if (TimeMode == duration::mode::fade)
+      {
+        analog_t fd0 = freezeDelay,   fd1 = *position();
+        analog_t fs0 = freezeSize,    fs1 = mSize.samples;
+        analog_t fade = 0, fadeInc = 1.0 / output.getSize();
+        analog_t r0 = readRate, r1 = *rate();
+        analog_t p0 = phase, dp0 = r0/fs0, dp1 = r1/fs1;
+        while (w)
+        {
+          analog_t sd0 = fd0 + fs0*(1.0-p0);
+          analog_t sd1 = fd1 + fs1*(1.0-phase);
+          T wet = (1.0 - fade)*buffer->template read<I>(sd0) + fade*buffer->template read<I>(sd1);
+          phase = math::wrap01(phase + dp1);
+          p0 = math::wrap01(p0 + dp0);
+          fade += fadeInc;
+
+          if (UseInput)
+          {
+            binary_t isEnabled = enabled().readBinary();
+            analog_t wetLevel = crossfade.process(isEnabled ? 1.0 : 0.0);
+            T in = r.read();
+            if (!isEnabled)
+            {
+              buffer->write(in);
+            }
+            w << wetLevel*wet + (1.0 - wetLevel)*in;
+          }
+          else
+          {
+            w << wet;
+          }
+        }
+        freezeDelay = fd1;
+        freezeSize = fs1;
+        readRate = r1;
+      }
+    }
   };
 
   template<typename T, typename F>
@@ -1929,7 +2101,7 @@ namespace vessl
   {
     analog_t fSize = static_cast<analog_t>(getSize());
     phase = math::wrap<analog_t>(phase, -1.0, 1.0);
-    float sampleDelay = phase > 0 ? (1.0f - phase) * fSize : -phase * fSize;
+    analog_t sampleDelay = phase > 0 ? (1.0 - phase) * fSize : -phase * fSize;
     return read(sampleDelay);
   }
 
@@ -1950,7 +2122,7 @@ namespace vessl
   template<duration::mode TimeMode>
   void delay<T, I>::process(array<T> in, array<T> out)
   {
-    if (TimeMode == duration::mode::crossfade)
+    if (TimeMode == duration::mode::fade)
     {
       analog_t fade = 0;
       analog_t fadeInc = 1.0f / in.getSize();
@@ -2001,7 +2173,7 @@ namespace vessl
   }
 
   template<>
-  inline float math::wrap01(float v) { float i; return modf(v, &i); }
+  inline float math::wrap01(float v) { float i; float f = modf(v, &i); return f < 0 ? 1.0f - f : f; }
 
 #ifdef ARM_CORTEX
   template<>

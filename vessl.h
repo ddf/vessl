@@ -1315,7 +1315,7 @@ namespace vessl
   {
     delayline<T>* buffer;
     duration mSize;
-    analog_t phase;
+    analog_t mPhase;
     smoother<analog_t> crossfade; // used to crossfade between the incoming signal and the freeze signal when enabled changes.
     analog_t freezeDelay, freezeSize, readRate;
 
@@ -1336,20 +1336,24 @@ namespace vessl
 
   public:
     freeze(delayline<T>* buffer, analog_t sampleRate) : unit(init, sampleRate), buffer(buffer)
-    , mSize(buffer->getSize()-1), phase(0), crossfade(0.75f), freezeDelay(0), freezeSize(mSize.samples), readRate(1)
+    , mSize(buffer->getSize()-1), mPhase(0), crossfade(0.75f), freezeDelay(0), freezeSize(mSize.samples), readRate(1)
     { rate() << 1.0; }
 
     parameter& enabled() { return init.params[0]; }
     parameter& position() { return init.params[1]; }
     parameter& size() { return init.params[2]; }
     parameter& rate() { return init.params[3]; }
+    // should this be a parameter? there's not much gained by it.
+    analog_t phase() const { return mPhase; }
+    // reset the phase to zero (argument for making it a parameter?)
+    void reset() { mPhase = 0; }
 
     T generate() override
     {
       freezeDelay = *position();
       freezeSize  = mSize.samples;
-      analog_t sampleDelay = freezeDelay + (1.0-phase)*freezeSize;
-      phase = math::wrap01(phase + *rate() / freezeSize);
+      analog_t sampleDelay = freezeDelay + (1.0-mPhase)*freezeSize;
+      mPhase = math::wrap01(mPhase + *rate() / freezeSize);
       return buffer->template read<I>(sampleDelay);
     }
     
@@ -1410,8 +1414,8 @@ namespace vessl
           freezeDelay = easing::lerp<analog_t>(freezeDelay, fd, st*20);
           freezeSize = easing::lerp<analog_t>(freezeSize, fs, st*20);
           readRate = easing::lerp<analog_t>(readRate, rt, st*10);
-          analog_t sampleDelay = freezeDelay + (1.0 - phase)*freezeSize;
-          phase = math::wrap01(phase + readRate/freezeSize);
+          analog_t sampleDelay = freezeDelay + (1.0 - mPhase)*freezeSize;
+          mPhase = math::wrap01(mPhase + readRate/freezeSize);
           T wet = buffer->template read<I>(sampleDelay);
 
           if (UseInput)
@@ -1438,13 +1442,13 @@ namespace vessl
         analog_t fs0 = freezeSize,    fs1 = mSize.samples;
         analog_t fade = 0, fadeInc = 1.0 / output.getSize();
         analog_t r0 = readRate, r1 = *rate();
-        analog_t p0 = phase, dp0 = r0/fs0, dp1 = r1/fs1;
+        analog_t p0 = mPhase, dp0 = r0/fs0, dp1 = r1/fs1;
         while (w)
         {
           analog_t sd0 = fd0 + fs0*(1.0-p0);
-          analog_t sd1 = fd1 + fs1*(1.0-phase);
+          analog_t sd1 = fd1 + fs1*(1.0-mPhase);
           T wet = (1.0 - fade)*buffer->template read<I>(sd0) + fade*buffer->template read<I>(sd1);
-          phase = math::wrap01(phase + dp1);
+          mPhase = math::wrap01(mPhase + dp1);
           p0 = math::wrap01(p0 + dp0);
           fade += fadeInc;
 

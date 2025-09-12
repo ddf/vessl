@@ -781,11 +781,11 @@ namespace vessl
     period_t periodMin;
     period_t periodMax;
     period_t ticks;
-    analog_t sampleRate;
+    analog_t sr;
 
     clockable(analog_t sampleRate, period_t samplePeriodMin, period_t samplePeriodMax, analog_t bpm = 60)
     : tempo(duration::fromBpm(bpm, sampleRate)), periodMin(samplePeriodMin), periodMax(samplePeriodMax)
-    , ticks(0), sampleRate(sampleRate)
+    , ticks(0), sr(sampleRate)
     {}
 
     // subclasses should call tick for every sample generated/processed
@@ -800,13 +800,12 @@ namespace vessl
     clockable(const clockable&) = default;
     clockable(clockable&&) = default;
     clockable& operator=(const clockable&) = default;
-    clockable& operator=(clockable&&) = default
-    ;
+    clockable& operator=(clockable&&) = default;
     // users should call clock at the beginning of every clock pulse
     void clock();
     void clock(period_t sampleDelay);
 
-    analog_t getBpm() const { return tempo.toBpm(sampleRate); }
+    analog_t getBpm() const { return tempo.toBpm(sr); }
   };
   
   // a waveform that can be evaluated using a normalized phase value

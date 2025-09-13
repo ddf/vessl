@@ -806,6 +806,8 @@ namespace vessl
     void clock(period_t sampleDelay);
 
     analog_t getBpm() const { return tempo.toBpm(sr); }
+    // length of one clock pulse in samples
+    analog_t getPeriod() const { return tempo.samples;}
   };
   
   // a waveform that can be evaluated using a normalized phase value

@@ -208,31 +208,56 @@ namespace vessl
   namespace frame
   {
     template<typename T, size_t N>
+    struct channels;
+    
+    namespace mono
+    {
+      typedef channels<analog_t, 1> analog_t;
+      typedef channels<digital_t, 1> digital_t;
+    }
+
+    namespace stereo
+    {
+      typedef channels<analog_t, 2> analog_t;
+      typedef channels<digital_t, 2> digital_t;
+    }
+    
+    template<typename T, size_t N>
     struct channels : array<T>
     {
       T samples[N];
-
       channels() : array<T>(samples, N) { array<T>::fill(0); }
+      channels<T, 1> toMono() const
+      {
+        T sum = 0;
+        for (size_t c = 0; c < N; ++c)
+        {
+          sum += samples[c];
+        }
+        return channels<T, 1>(sum / N);
+      }
     };
 
     template<typename T>
-    class mono : public channels<T, 1>
+    struct channels<T, 1> : array<T>
     {
-      using channels<T,1>::samples;
-  
-    public:
+      T samples[1];
+      channels() : array<T>(samples, 1) { samples[0] = 0; }
+      explicit channels(T m) : array<T>(samples, 1) { samples[0] = m; }
+      channels toMono() const;
+
       T& value() { return samples[0]; }
       const T& value() const { return samples[0]; }
     };
 
     template<typename T>
-    class stereo : public channels<T, 2>
+    struct channels<T, 2> : array<T>
     {
-      using channels<T, 2>::samples;
-      
-    public:
-      stereo() {}
-      stereo(T l, T r) { samples[0] = l, samples[1] = r; }
+      T samples[2];
+
+      channels() : array<T>(samples, 1) { samples[0] = 0; samples[1] = 0; }
+      channels(T l, T r) { samples[0] = l, samples[1] = r; }
+      channels<T, 1> toMono() const { return channels<T, 1>((samples[0] + samples[1]) * 0.5f); }
     
       T& left() { return samples[0]; }
       const T& left() const { return samples[0]; }
@@ -502,6 +527,9 @@ namespace vessl
     T epsilon() { return std::numeric_limits<T>::epsilon(); }
 
     template<typename T>
+    T exp(T v) { return ::exp(v); }
+
+    template<typename T>
     T exp2(T v) { return ::exp2(v); }
 
     template<typename T>
@@ -551,9 +579,23 @@ namespace vessl
 
   namespace random
   {
-    static constexpr int I32_MAX = RAND_MAX;
-    inline void si32(unsigned seed) { srand(seed); }
-    inline int i32() { return rand(); }
+    // implements the xorshifter algorithm
+    static constexpr uint32_t U32_MAX = UINT32_MAX;
+    static uint32_t ru32Seed = 33641;
+    inline void su32(uint32_t seed) {ru32Seed = seed; }
+    inline uint32_t u32()
+    {
+      ru32Seed ^= ru32Seed << 13; ru32Seed ^= ru32Seed >> 17; ru32Seed ^= ru32Seed << 5;
+      return ru32Seed;
+    }
+
+    template<typename T>
+    T range(T low, T high)
+    {
+      static constexpr analog_t SCALE = 1/4294967296.0;
+      analog_t r = static_cast<analog_t>(u32()) * SCALE;
+      return low + r*(high-low);
+    }
   }
 
   template<typename T = analog_t>
@@ -1302,6 +1344,56 @@ namespace vessl
     template<duration::mode TimeMode = duration::mode::slew>
     void process(array<T> input, array<T> output);
   };
+
+  template<typename T>
+  class follow : public unitProcessor<T>
+  {
+    unit::init<1> init = {
+      "envelope follower",
+      {
+        parameter("response time", parameter::type::analog),
+      }
+    };
+
+  public:
+    follow(array<T> window, analog_t sampleRate, analog_t responseTimeInSeconds)
+      : unitProcessor<T>(init, sampleRate), window(window)
+      , delta(math::exp(-1.0 / (sampleRate*responseTimeInSeconds)))
+      , previous(0), current(0), writer(window)
+    {
+      
+    }
+
+    T process(const T& in) override
+    {
+      writer.write(in);
+      if (writer.isFull())
+      {
+        previous = current;
+        current = T(0);
+        typename
+        array<T>::reader r = window.getReader();
+        while (r)
+        {
+          current *= delta;
+          current += (1.0 - delta)*math::abs(r.read());
+        }
+        writer = window.getWriter();
+      }
+
+      analog_t t = 1.0 - static_cast<analog_t>(writer.available()) / static_cast<analog_t>(window.getSize());
+      return previous + (current - previous) * t;
+    }
+
+    using processor<T>::process;
+
+    typename
+    array<T>::writer writer;
+    array<T> window;
+    analog_t delta;
+    T previous;
+    T current;
+  };
   
   // when used as a processor, will write incoming audio to the delayline
   // and output the incoming signal if freeze is not engaged.
@@ -1630,6 +1722,9 @@ namespace vessl
   }
 
   template<typename T>
+  frame::channels<T, 1> frame::channels<T, 1>::toMono() const { return channels(samples[0]); }
+
+  template<typename T>
   typename array<T>::writer& operator<<(typename array<T>::writer& w, const T& v)
   {
     w.write(v);
@@ -1873,12 +1968,12 @@ namespace vessl
     {
       case noiseTint::white:
       {
-        return 2 * (static_cast<T>(random::i32()) / random::I32_MAX) - 1;
+        return 2 * random::range<T>(0, 1) - 1;
       }
 
-        // #TODO: this contains clicks when run at audio frequency and I'm not sure why.
-        // Need to either read up on how to do this properly and write a new implementation,
-        // or find some open source code that can be used without causing license issues.
+      // #TODO: this contains clicks when run at audio frequency and I'm not sure why.
+      // Need to either read up on how to do this properly and write a new implementation,
+      // or find some open source code that can be used without causing license issues.
       case noiseTint::red:
       case noiseTint::brown:
       {
@@ -1886,7 +1981,7 @@ namespace vessl
         static const T AC = 6.2;
         static T prev = 0;
         analog_t alpha = dt / (dt + RC);
-        T white = 2 * (static_cast<T>(random::i32()) / random::I32_MAX) - 1;
+        T white = 2 * random::range(0, 1) - 1;
         prev = easing::lerp(prev, white, alpha);
         return prev * AC;
       }
@@ -1899,9 +1994,10 @@ namespace vessl
         static constexpr int MAX_KEY = 0x1f;
         static int key = 0;
         static T maxSum = 90;
-        static int whiteValues[6] = {
-          random::i32() % (RANGE / 6), random::i32() % (RANGE / 6), random::i32() % (RANGE / 6),
-          random::i32() % (RANGE / 6), random::i32() % (RANGE / 6), random::i32() % (RANGE / 6) };
+        static uint32_t whiteValues[6] = {
+          random::u32() % (RANGE / 6), random::u32() % (RANGE / 6), random::u32() % (RANGE / 6),
+          random::u32() % (RANGE / 6), random::u32() % (RANGE / 6), random::u32() % (RANGE / 6)
+        };
 
         int lastKey = key;
         T sum = 0;
@@ -1912,7 +2008,7 @@ namespace vessl
         {
           if ((diff & (1 << i)) != 0)
           {
-            whiteValues[i] = random::i32() % (RANGE / 6);
+            whiteValues[i] = random::u32() % (RANGE / 6);
           }
           sum += whiteValues[i];
         }

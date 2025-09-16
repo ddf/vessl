@@ -24,6 +24,7 @@
 
 // ReSharper disable CppClangTidyPortabilityTemplateVirtualMemberFunction
 #pragma once
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <cstdint>
@@ -65,9 +66,8 @@ static void assert(bool condition) { }
 // Note: In all classes using typename T, it is assumed to be POD and to have support for all arithmetic operators
 namespace vessl
 {
-  // @todo use these throughout
   using char_t = char;
-  using size_t = size_t;
+  using size_t = std::size_t;
   using binary_t = bool;
   using digital_t = int64_t;
   using analog_t = float;
@@ -190,13 +190,19 @@ namespace vessl
 
     void fill(T value);
     // returns dest
-    array add(array other, array dest);
+    array add(array other, array dest) const;
     // returns this
     array add(array other) { return add(other, *this); }
+    array subtract(array other, array dest) const;
+    array subtract(array other) { return subtract(other, *this); }
     // returns dest
-    array scale(T value, array dest);
+    array scale(analog_t value, array dest) const;
     // returns this
-    array scale(T value) { return scale(value, *this); }
+    array scale(analog_t value) { return scale(value, *this); }
+    // returns dest
+    array multiply(array other, array dest) const;
+    // returns this
+    array multiply(array other) { return multiply(other, *this); }
   };
 
   template<typename T>
@@ -227,6 +233,9 @@ namespace vessl
     {
       T samples[N];
       channels() : array<T>(samples, N) { array<T>::fill(0); }
+      channels(channels const& other) : array<T>(samples, N) { array<T>::copy(other); }
+      // @todo move and assignment operators
+      
       channels<T, 1> toMono() const
       {
         T sum = 0;
@@ -244,6 +253,32 @@ namespace vessl
       T samples[1];
       channels() : array<T>(samples, 1) { samples[0] = 0; }
       explicit channels(T m) : array<T>(samples, 1) { samples[0] = m; }
+      channels(const channels& other) : array<T>(samples, 1) { samples[0] = other.samples[0]; }
+      channels(channels&& other) noexcept : array<T>(samples, 1) { samples[0] = std::move(other.samples[0]); }
+      virtual ~channels() = default;
+      
+      channels& operator=(const channels& other)  // NOLINT(bugprone-unhandled-self-assignment)
+      {
+        if (this == &other)
+        {
+          return *this;
+        }
+        
+        samples[0] = other.samples[0];
+        return *this;
+      }
+      
+      channels& operator=(channels&& other) noexcept
+      {
+        if (this == &other)
+        {
+          return *this;
+        }
+        
+        samples[0] = std::move(other.samples[0]);
+        return *this;
+      }
+      
       channels toMono() const;
 
       T& value() { return samples[0]; }
@@ -255,8 +290,36 @@ namespace vessl
     {
       T samples[2];
 
-      channels() : array<T>(samples, 1) { samples[0] = 0; samples[1] = 0; }
-      channels(T l, T r) { samples[0] = l, samples[1] = r; }
+      channels() : array<T>(samples, 2) { samples[0] = 0; samples[1] = 0; }
+      channels(T left, T right) : array<T>(samples, 2) { samples[0] = left, samples[1] = right; }
+      channels(const channels& other) : array<T>(samples, 2) { samples[0] = other.samples[0]; samples[1] = other.samples[1]; }
+      channels(channels&& other) noexcept : array<T>(samples, 2) { samples[0] = std::move(other.samples[0]); samples[1] = std::move(other.samples[1]); }
+      virtual ~channels() = default;
+      
+      channels& operator=(const channels& other)  // NOLINT(bugprone-unhandled-self-assignment)
+      {
+        if (this == &other)
+        {
+          return *this;
+        }
+        
+        samples[0] = other.samples[0];
+        samples[1] = other.samples[1];
+        return *this;
+      }
+      
+      channels& operator=(channels&& other) noexcept
+      {
+        if (this == &other)
+        {
+          return *this;
+        }
+        
+        samples[0] = std::move(other.samples[0]);
+        samples[1] = std::move(other.samples[1]);
+        return *this;
+      }
+      
       channels<T, 1> toMono() const { return channels<T, 1>((samples[0] + samples[1]) * 0.5f); }
     
       T& left() { return samples[0]; }
@@ -264,7 +327,47 @@ namespace vessl
       T& right() { return samples[1]; }
       const T& right() const { return samples[1]; }
     };
-  };
+
+    template<typename T, size_t N>
+    constexpr channels<T, N> operator+(channels<T,N> lhs, const channels<T,N>& rhs)
+    {
+      channels<T, N> result;
+      lhs.add(rhs, result);
+      return result;
+    }
+
+    template<typename T, size_t N>
+    constexpr channels<T, N> operator-(channels<T,N> lhs, const channels<T,N>& rhs)
+    {
+      channels<T, N> result;
+      lhs.subtract(rhs, result);
+      return result;
+    }
+
+    template<typename T, size_t N>
+    constexpr channels<T, N> operator*(channels<T, N> lhs, const channels<T,N>& rhs)
+    {
+      channels<T, N> result;
+      lhs.multiply(rhs, result);
+      return result;
+    }
+
+    template<typename T, size_t N>
+    constexpr channels<T, N> operator*(channels<T, N> lhs, const analog_t& rhs)
+    {
+      channels<T, N> result;
+      lhs.scale(rhs, result);
+      return result;
+    }
+
+    template<typename T, size_t N>
+    constexpr channels<T, N> operator*(analog_t lhs, const channels<T, N>& rhs)
+    {
+      channels<T, N> result;
+      rhs.scale(lhs, result);
+      return result;
+    }
+  }
 
   template<typename T>
   class processor
@@ -622,23 +725,23 @@ namespace vessl
     namespace quad
     {
       struct in { analog_t operator()(analog_t t) const { return t * t; } };
-      struct out { analog_t operator()(analog_t t) const { return 1.0 - (1.0 - t) * (1.0 - t); } };
-      struct inOut { analog_t operator()(analog_t t) const { return t < 0.5 ? 2*t*t : 1.0 - math::pow<analog_t>(-2.0*t+2.0, 2.0) * 0.5f;  } };
-      struct outIn { static out qo; analog_t operator()(analog_t t) const { return t < 0.5f ? qo(2.0*t) * 0.5f : 1.0f - qo(2.0*t) * 0.5f; } };
+      struct out { analog_t operator()(analog_t t) const {  return 1.0 - (1.0 - t) * (1.0 - t); } };  // NOLINT(bugprone-narrowing-conversions, cppcoreguidelines-narrowing-conversions, clang-diagnostic-implicit-float-conversion)
+      struct inOut { analog_t operator()(analog_t t) const { return t < 0.5 ? 2*t*t : 1.0 - math::pow<analog_t>(-2*t+2, 2) * 0.5;  } };  // NOLINT(bugprone-narrowing-conversions, cppcoreguidelines-narrowing-conversions, clang-diagnostic-implicit-float-conversion)
+      struct outIn { static out qo; analog_t operator()(analog_t t) const { return t < 0.5 ? qo(2*t) * 0.5f : 1.0 - qo(2*t) * 0.5; } };  // NOLINT(bugprone-narrowing-conversions, cppcoreguidelines-narrowing-conversions, clang-diagnostic-implicit-float-conversion)
     }
 
     namespace expo
     {
-      struct in { analog_t operator()(analog_t t) const { return t <= math::epsilon<analog_t>() ? 0.f : math::pow<analog_t>(2.0, 10*t-10); } };
-      struct out { analog_t operator()(analog_t t) const { return t >= 1.0f - math::epsilon<analog_t>() ? 1.0f : 1.0f - math::pow<analog_t>(2.0, -10*t);} };
+      struct in { analog_t operator()(analog_t t) const { return t <= math::epsilon<analog_t>() ? 0 : math::pow<analog_t>(2, 10*t-10); } };
+      struct out { analog_t operator()(analog_t t) const { return t >= 1.0 - math::epsilon<analog_t>() ? 1.0 : 1.0 - math::pow<analog_t>(2, -10*t);} };  // NOLINT(bugprone-narrowing-conversions, cppcoreguidelines-narrowing-conversions, clang-diagnostic-implicit-float-conversion)
       struct inOut
       {
         analog_t operator()(analog_t t) const
         {
           return t <= math::epsilon<analog_t>() ? 0.0
-          : t >= 1.0 - math::epsilon<analog_t>() ? 1.0
-          : t < 0.5 ? math::pow<analog_t>(2.0, 20*t-10)*0.5
-          : 2.0 - math::pow<analog_t>(2.0, -20*t+10)*0.5;
+          : t >= 1.0 - math::epsilon<analog_t>() ? 1.0  // NOLINT(cppcoreguidelines-narrowing-conversions)
+          : t < 0.5 ? math::pow<analog_t>(2.0, 20*t-10)*0.5  // NOLINT(clang-diagnostic-implicit-float-conversion)
+          : 2.0 - math::pow<analog_t>(2.0, -20*t+10)*0.5;  // NOLINT(clang-diagnostic-implicit-float-conversion)
         }
       };
     }
@@ -786,10 +889,10 @@ namespace vessl
   struct duration
   {
     // convert bpm to frequency in Hz
-    static constexpr analog_t B2F = 1.0 / 60.0;
+    static constexpr analog_t B2F = 1.0 / 60.0;  // NOLINT(clang-diagnostic-implicit-float-conversion)
     static constexpr analog_t F2B = 60;
 
-    // can be used by units an indication for how to treat changes in time values (see: delay & fr)
+    // can be used by units an indication for how to treat changes in time values (see: delay & freeze)
     enum class mode : uint8_t
     {
       snap, // use duration value directly
@@ -1291,10 +1394,10 @@ namespace vessl
 
     // reads behind the write head with sampleDelay (i.e. the ith sample previously written)
     // where a delay of 0 samples will give the most recently written value.
-    T read(size_t sampleDelay);
+    T read(size_t sampleDelay) const;
 
     // reads behind the write head with a fractional sampleDelay and given interpolation
-    template<typename I = interpolation::linear<T>>
+    template<typename I>
     T read(analog_t sampleDelay) const;
 
     // phase will be wrapped to [-1,1] where 0 is the oldest sample recorded
@@ -1357,9 +1460,8 @@ namespace vessl
 
   public:
     follow(array<T> window, analog_t sampleRate, analog_t responseTimeInSeconds)
-      : unitProcessor<T>(init, sampleRate), window(window)
-      , delta(math::exp(-1.0 / (sampleRate*responseTimeInSeconds)))
-      , previous(0), current(0), writer(window)
+      : unitProcessor<T>(init, sampleRate), writer(window), window(window)
+      , delta(math::exp(-1.0 / (sampleRate*responseTimeInSeconds))), previous(0), current(0)
     {
       
     }
@@ -1406,7 +1508,7 @@ namespace vessl
   template<typename T, typename I = interpolation::linear<T>>
   class freeze : public unit, public processor<T>, public generator<T>
   {
-    delayline<T>* buffer;
+    delayline<T> buffer;
     duration mSize;
     analog_t mPhase;
     smoother<analog_t> crossfade; // used to crossfade between the incoming signal and the freeze signal when enabled changes.
@@ -1428,10 +1530,12 @@ namespace vessl
     };
 
   public:
-    freeze(delayline<T>* buffer, analog_t sampleRate) : unit(init, sampleRate), buffer(buffer)
-    , mSize(buffer->getSize()-1), mPhase(0), crossfade(0.75f), freezeDelay(0), freezeSize(mSize.samples), readRate(1)
+    freeze(array<T> buffer, analog_t sampleRate) : unit(init, sampleRate), buffer(buffer.getData(), buffer.getSize())
+    , mSize(buffer.getSize()-1), mPhase(0), crossfade(0.75f), freezeDelay(0), freezeSize(mSize.samples), readRate(1)
     { rate() << 1.0; }
 
+    const delayline<T>& getBuffer() const { return buffer; }
+    
     parameter& enabled() { return init.params[0]; }
     parameter& position() { return init.params[1]; }
     parameter& size() { return init.params[2]; }
@@ -1447,7 +1551,7 @@ namespace vessl
       freezeSize  = mSize.samples;
       analog_t sampleDelay = freezeDelay + (1.0-mPhase)*freezeSize;
       mPhase = math::wrap01(mPhase + *rate() / freezeSize);
-      return buffer->template read<I>(sampleDelay);
+      return buffer.template read<I>(sampleDelay);
     }
     
     T process(const T& in) override
@@ -1457,7 +1561,7 @@ namespace vessl
       T wet = generate();
       if (!isEnabled)
       {
-        buffer->write(in);
+        buffer.write(in);
       }
       return wetLevel*wet + (1.0 - wetLevel)*in;
     }
@@ -1475,8 +1579,8 @@ namespace vessl
     template<duration::mode TimeMode, bool UseInput>
     void procgen(array<T> input, array<T> output)
     {
-      typename array<T>::reader r = input.getReader();
-      typename array<T>::writer w = output.getWriter();
+      typename array<T>::reader r(input);
+      typename array<T>::writer w(output);
 
       if (TimeMode == duration::mode::snap)
       {
@@ -1504,12 +1608,12 @@ namespace vessl
         analog_t st = dt();
         while (w)
         {
-          freezeDelay = easing::lerp<analog_t>(freezeDelay, fd, st*20);
-          freezeSize = easing::lerp<analog_t>(freezeSize, fs, st*20);
-          readRate = easing::lerp<analog_t>(readRate, rt, st*10);
+          freezeDelay = easing::lerp(freezeDelay, fd, st*20);
+          freezeSize = easing::lerp(freezeSize, fs, st*20);
+          readRate = easing::lerp(readRate, rt, st*10);
           analog_t sampleDelay = freezeDelay + (1.0 - mPhase)*freezeSize;
           mPhase = math::wrap01(mPhase + readRate/freezeSize);
-          T wet = buffer->template read<I>(sampleDelay);
+          T wet = buffer.template read<I>(sampleDelay);
 
           if (UseInput)
           {
@@ -1518,9 +1622,9 @@ namespace vessl
             T in = r.read();
             if (!isEnabled)
             {
-              buffer->write(in);
+              buffer.write(in);
             }
-            w << wetLevel*wet + (1.0 - wetLevel)*in;
+            w << wet*wetLevel + in*(1.0 - wetLevel);
           }
           else
           {
@@ -1540,7 +1644,7 @@ namespace vessl
         {
           analog_t sd0 = fd0 + fs0*(1.0-p0);
           analog_t sd1 = fd1 + fs1*(1.0-mPhase);
-          T wet = (1.0 - fade)*buffer->template read<I>(sd0) + fade*buffer->template read<I>(sd1);
+          T wet = (1.0 - fade)*buffer.template read<I>(sd0) + fade*buffer.template read<I>(sd1);
           mPhase = math::wrap01(mPhase + dp1);
           p0 = math::wrap01(p0 + dp0);
           fade += fadeInc;
@@ -1552,7 +1656,7 @@ namespace vessl
             T in = r.read();
             if (!isEnabled)
             {
-              buffer->write(in);
+              buffer.write(in);
             }
             w << wetLevel*wet + (1.0 - wetLevel)*in;
           }
@@ -1695,7 +1799,7 @@ namespace vessl
   }
 
   template<typename T>
-  array<T> array<T>::add(array other, array dest)
+  array<T> array<T>::add(array other, array dest) const
   {
     VASSERT(size == other.size && size <= dest.size, "arrays are have different lengths or destination is too small");
     reader a(data, size);
@@ -1709,7 +1813,21 @@ namespace vessl
   }
 
   template<typename T>
-  array<T> array<T>::scale(T value, array dest)
+  array<T> array<T>::subtract(array other, array dest) const
+  {
+    VASSERT(size == other.size && size <= dest.size, "arrays are have different lengths or destination is too small");
+    reader a(data, size);
+    reader b(other.data, other.size);
+    writer c(dest.data, dest.size);
+    while (a)
+    {
+      c << a.read() - b.read();
+    }
+    return dest;
+  }
+
+  template<typename T>
+  array<T> array<T>::scale(analog_t value, array dest) const
   {
     VASSERT(size <= dest.size, "destination size is too small");
     reader a(data, size);
@@ -1717,6 +1835,20 @@ namespace vessl
     while (a)
     {
       b << a.read() * value;
+    }
+    return dest;
+  }
+
+  template<typename T>
+  array<T> array<T>::multiply(array other, array dest) const
+  {
+    VASSERT(size == other.size && size <= dest.size, "arrays are have different lengths or destination is too small");
+    reader a(data, size);
+    reader b(other.data, other.size);
+    writer c(dest.data, dest.size);
+    while (a)
+    {
+      c << a.read() * b.read();
     }
     return dest;
   }
@@ -2171,7 +2303,7 @@ namespace vessl
   }
 
   template<typename T>
-  T delayline<T>::read(size_t sampleDelay)
+  T delayline<T>::read(size_t sampleDelay) const
   {
     assert(sampleDelay < getSize());
     sampleDelay = getSize() - 1 - sampleDelay;
@@ -2203,7 +2335,7 @@ namespace vessl
     analog_t fSize = static_cast<analog_t>(getSize());
     phase = math::wrap<analog_t>(phase, -1.0, 1.0);
     analog_t sampleDelay = phase > 0 ? (1.0 - phase) * fSize : -phase * fSize;
-    return read(sampleDelay);
+    return read<interpolation::linear<T>>(sampleDelay);
   }
 
   template<typename T, typename I>
@@ -2312,18 +2444,34 @@ namespace vessl
   }
   
   template<>
-  array<float> array<float>::add(array other, array dest)
+  array<float> array<float>::add(array other, array dest) const
   {
-    assert(size == other.size && size <= dest.size);
+    VASSERT(size == other.size && size <= dest.size, "Arrays are different sizes or dest is not large enough.");
     arm_add_f32(data, other.data, dest.data, size);
     return dest;
   }
 
   template<>
-  array<float> array<float>::scale(float value, array dest)
+  array<float> array<float>::subtract(array other, array dest) const
   {
-    assert(size <= dest.size);
+    VASSERT(size == other.size && size <= dest.size, "Arrays are different sizes or dest is not large enough.");
+    arm_sub_f32(data, other.data, dest.data, size);
+    return dest;
+  }
+
+  template<>
+  array<float> array<float>::scale(float value, array dest) const
+  {
+    VASSERT(size <= dest.size, "Destination array is not large enough");
     arm_scale_f32(data, value, dest.data, size);
+    return dest;
+  }
+
+  template<>
+  array<float> array<float>::multiply(array other, array dest) const
+  {
+    VASSERT(size == other.size && size <= dest.size, "Arrays are different sizes or dest is not large enough.");
+    arm_mult_f32(data, other.data, dest.data, size);
     return dest;
   }
   

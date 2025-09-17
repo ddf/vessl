@@ -233,6 +233,7 @@ namespace vessl
     {
       T samples[N];
       channels() : array<T>(samples, N) { array<T>::fill(0); }
+      explicit channels(T m) : array<T>(samples, N) { array<T>::fill(m); }
       channels(channels const& other) : array<T>(samples, N) { array<T>::copy(other); }
       // @todo move and assignment operators
       
@@ -291,6 +292,7 @@ namespace vessl
       T samples[2];
 
       channels() : array<T>(samples, 2) { samples[0] = 0; samples[1] = 0; }
+      explicit channels(T m) : array<T>(samples, 2) { samples[0] = m; samples[1] = m; }
       channels(T left, T right) : array<T>(samples, 2) { samples[0] = left, samples[1] = right; }
       channels(const channels& other) : array<T>(samples, 2) { samples[0] = other.samples[0]; samples[1] = other.samples[1]; }
       channels(channels&& other) noexcept : array<T>(samples, 2) { samples[0] = std::move(other.samples[0]); samples[1] = std::move(other.samples[1]); }
@@ -365,6 +367,17 @@ namespace vessl
     {
       channels<T, N> result;
       rhs.scale(lhs, result);
+      return result;
+    }
+
+    template<typename T, size_t N>
+    constexpr channels<T, N> operator^(channels<T, N> lhs, const channels<T,N>& rhs)
+    {
+      channels<T, N> result;
+      for (size_t i = 0; i < N; ++i)
+      {
+        result[i] = static_cast<digital_t>(lhs[i]) ^ static_cast<digital_t>(rhs[i]);
+      }
       return result;
     }
   }
@@ -652,6 +665,17 @@ namespace vessl
 
     template<typename T>
     T round(T x) { return ::round(x); }
+
+    template<typename T, size_t N>
+    frame::channels<T, N> round(frame::channels<T, N> x)
+    {
+      frame::channels<T, N> result;
+      for (size_t i = 0; i < N; i++)
+      {
+        result[i] = round(x[i]);
+      }
+      return result;
+    }
 
     template<typename T>
     T sin(T x) { return ::sin(x); }
@@ -1729,7 +1753,7 @@ namespace vessl
     
     T prevInput;
     T currSample;
-    T rateAlpha;
+    analog_t rateAlpha;
 
     using unit::dt;
 
@@ -2416,13 +2440,13 @@ namespace vessl
 
     analog_t bd = math::constrain<analog_t>(*depth(), 2.0, MaxBits);
     analog_t scalar = math::pow<analog_t>(2.0, bd) - 1;
-    digital_t val = currSample*scalar;
+    T val = math::round(currSample*scalar);
     if (mangle().template read<bool>())
     {
-      val ^= static_cast<digital_t>(prevInput*scalar);
+      val = val ^ math::round(prevInput*scalar);
     }
     prevInput = in;
-    return static_cast<analog_t>(val) / scalar;
+    return val * (1.0 / scalar);
   }
 
   template<>

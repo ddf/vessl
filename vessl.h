@@ -781,7 +781,18 @@ namespace vessl
     template<typename T>
     T lerp(T begin, T end, analog_t t) { return interp<linear, T>(begin, end, t); }
   }
-
+  
+  namespace mixing
+  {
+    template<typename T, typename E = easing::linear>
+    T crossfade(T a, T b, analog_t f)
+    {
+      static E ease;
+      return a*ease(1.0 - f) + b*ease(f);
+    }
+    
+  }
+  
   namespace filtering
   {
     template<typename T>
@@ -1427,8 +1438,7 @@ namespace vessl
     // phase will be wrapped to [-1,1] where 0 is the oldest sample recorded
     T evaluate(analog_t phase) const override;
   };
-
-  /// delay that will smoothly change time, generating fluctuations in pitch
+  
   template<typename T, typename I = interpolation::linear<T>>
   class delay : public unitProcessor<T>
   {
@@ -1457,17 +1467,17 @@ namespace vessl
       feedback() << feedbackAmount;
     }
 
+    const delayline<T>& getBuffer() const { return buffer; }
+
     /// delay time expressed as vessl::time (i.e. samples), can be set using an analog_t
     parameter& time() { return init.params[0]; }
     /// amount of signal to feedback, can be negative to invert feedback signal, clamped [-1,1]
     parameter& feedback() { return init.params[1]; }
-
-    // @todo remove parameter smoothing from this
+    
     T process(const T& in) override;
 
     void process(source<T>& source, sink<T>& sink) override { processor<T>::process(source, sink); }
-
-    // @todo handle all three modes correctly (see: freeze)
+    
     template<duration::mode TimeMode = duration::mode::slew>
     void process(array<T> input, array<T> output);
   };
@@ -1558,6 +1568,7 @@ namespace vessl
     , mSize(buffer.getSize()-1), mPhase(0), crossfade(0.75f), freezeDelay(0), freezeSize(mSize.samples), readRate(1)
     { rate() << 1.0; }
 
+    delayline<T>& getBuffer() { return buffer; }
     const delayline<T>& getBuffer() const { return buffer; }
     
     parameter& enabled() { return init.params[0]; }

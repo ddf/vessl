@@ -628,16 +628,10 @@ namespace vessl
     constexpr T twoPi() { return pi<T>() * 2; }
 
     template<typename T>
-    T abs(T val)
-    {
-      return ::abs(val);
-    }
+    T abs(T val) { return ::abs(val); }
     
     template<typename T>
-    T constrain(T val, T low, T high)
-    {
-      return val < low ? low : val > high ? high : val;
-    }
+    T constrain(T val, T low, T high) { return val < low ? low : val > high ? high : val; }
     
     template<typename T>
     T epsilon() { return std::numeric_limits<T>::epsilon(); }
@@ -724,19 +718,24 @@ namespace vessl
       return low + r*(high-low);
     }
   }
-
-  template<typename T = analog_t>
+  
   class gain
   {
-    T value;
+    analog_t value;
+    explicit gain(analog_t v) : value(v) {}
   public:
-    static T decibelsToScale(T db) { return math::exp10(db*0.05);}
-    static T scaleToDecibels(T scale) { return math::log10(scale)*20.0;}
-    static gain fromScale(T scale) { return {scale}; }
-    static gain fromDecibels(T dB) { return {decibelsToScale(dB)}; }
+    static analog_t decibelsToScale(analog_t db) { return math::exp10(db*static_cast<analog_t>(0.05));}
+    static analog_t scaleToDecibels(analog_t scale) { return math::log10(scale)*static_cast<analog_t>(20.0);}
+    static gain fromScale(analog_t scale) { return gain(scale); }
+    static gain fromDecibels(analog_t dB) { return gain(decibelsToScale(dB)); }
 
-    T toScale() const { return value; }
-    T toDecibels() const { return scaleToDecibels(value); }
+    // implement casting operators so that gain can be used as a parameter type.
+    explicit operator binary_t() const { return value > 0; }
+    explicit operator digital_t() const { return static_cast<digital_t>(toDecibels()); }
+    explicit operator analog_t() const { return value; }
+
+    analog_t toScale() const { return value; }
+    analog_t toDecibels() const { return scaleToDecibels(value); }
   };
   
   namespace easing
@@ -1783,6 +1782,32 @@ namespace vessl
     using unitProcessor<T>::process;
   };
 
+  // A simple peak limiter adapted from pinchenettes/stmlib via DaisySP
+  // @todo how best to handle this for non-floating point types (e.g. frame::stereo::analog_t)
+  template<typename T>
+  class limiter : public unitProcessor<T>
+  {
+    gain mPreGain;
+    unit::init<1> init = {
+      "limiter",
+      {
+        parameter("pre-gain", &mPreGain),
+      }
+    };
+    T mPeak;
+
+  public:
+    explicit limiter(gain preGain = gain::fromDecibels(0))
+      : unitProcessor<T>(init, 1), mPreGain(preGain), mPeak(0.5)
+    { }
+
+    parameter& preGain() { return init.params[0]; }
+
+    T process(const T& in) override;
+
+    using unitProcessor<T>::process;
+  };
+  
   /////////////////////////////////////////////////////////////////////////////////////////////////////
   // implementation
   //
@@ -2459,6 +2484,20 @@ namespace vessl
     }
     prevInput = in;
     return val * (1.0 / scalar);
+  }
+
+  template<typename T>
+  T limiter<T>::process(const T& in)
+  {
+    T pre = in*mPreGain.toScale();
+    T peak = math::abs(pre);
+    T error = peak - mPeak;
+    mPeak += (error > T(0)) ? T(0.05) : T(0.00002) * error;
+    analog_t gain = (mPeak <= 1.0 ? 1.0 : 1.0 / mPeak);
+    // DaisySP returns this, which sounds better for how I typically use this.
+    return saturation::softlimit(pre*gain*0.7);
+    // stmlib returns this, which clips more easily, but is faster.
+    //return pre*gain*0.8;
   }
 
   template<>

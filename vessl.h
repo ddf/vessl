@@ -1467,6 +1467,7 @@ namespace vessl
       feedback() << feedbackAmount;
     }
 
+    delayline<T>& getbuffer() { return buffer; }
     const delayline<T>& getBuffer() const { return buffer; }
 
     /// delay time expressed as vessl::time (i.e. samples), can be set using an analog_t

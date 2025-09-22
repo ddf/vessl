@@ -992,27 +992,45 @@ namespace vessl
   // a waveform that can be evaluated using a normalized phase value
   // implementors should accept negative phase, as well as phase values outside [-1,1]
   template<typename T>
-  class waveform
+  struct waveform
   {
-  public:
+    using SampleType = T;
+    
     waveform() = default;
     virtual ~waveform() = default;
-    waveform(const waveform&) = delete;
-    waveform(const waveform&&) = delete;
-    waveform& operator=(const waveform&) = delete;
-    waveform& operator=(waveform&&) = delete;
+    waveform(const waveform&) = default;
+    waveform(waveform&&) = default;
+    waveform& operator=(const waveform&) = default;
+    waveform& operator=(waveform&&) = default;
 
     virtual T evaluate(analog_t phase) const = 0;  // NOLINT(portability-template-virtual-member-function)
   };
 
   namespace waves
   {
-    template<typename T = double>
-    class sine final : public waveform<T>
+    template<typename T = analog_t>
+    struct sine final : waveform<T>
     {
-    public:
-      sine() = default;
       T evaluate(analog_t phase) const override { return math::sin(math::twoPi<T>() * phase); }
+    };
+
+    template<typename T = analog_t>
+    struct square final : waveform<T>
+    {
+      analog_t pulseWidth;
+      square() : pulseWidth(0.5) {}
+      explicit square(analog_t pulseWidth) : pulseWidth(pulseWidth) {}
+      T evaluate(analog_t phase) const override { return phase < pulseWidth ? 1 : -1; }
+    };
+
+    // same as square, but unipolar
+    template<typename T = analog_t>
+    struct clock final : waveform<T>
+    {
+      analog_t pulseWidth;
+      clock() : pulseWidth(0.5) {}
+      explicit clock(analog_t pulseWidth) : pulseWidth(pulseWidth) {}
+      T evaluate(analog_t phase) const override { return phase < pulseWidth ? 1 : 0; }
     };
   }
 
@@ -1378,9 +1396,10 @@ namespace vessl
     // for block processing
     using unitProcessor<T>::process;
   };
-  
-  template<typename T>
-  class oscil final : public unitGenerator<T>
+
+  // note: W must implement waveform<T>
+  template<class W>
+  class oscil final : public unitGenerator<typename W::SampleType>
   {
     unit::init<4> init = {
       "oscil", {
@@ -1390,17 +1409,22 @@ namespace vessl
         parameter("phase mod", parameter::type::analog)
       }
     };
-
-    waveform<T>* wave;
+    
     analog_t phase;
-
     using unit::dt;
 
   public:
-    explicit oscil(analog_t sampleRate, waveform<T>& wave, analog_t freqInHz = 440)
-    : unitGenerator<T>(init, sampleRate), wave(&wave), phase(0)
+    using T = typename W::SampleType;
+    
+    oscil() : unitGenerator<T>(init), phase(0) { fHz() << 440.0; }
+
+    template<typename... Ts>
+    explicit oscil(analog_t sampleRate, analog_t freqInHz, Ts... wargs)
+    : unitGenerator<T>(init, sampleRate), phase(0), waveform(wargs...)
     { fHz() << freqInHz; }
 
+    W waveform;
+    
     // frequency in Hz without FM applied
     parameter& fHz() { return init.params[0]; }
     // linear frequency modulation
@@ -2354,10 +2378,10 @@ namespace vessl
     return value;
   }
 
-  template<typename T>
-  T oscil<T>::generate()
+  template<class W>
+  typename W::SampleType oscil<W>::generate()
   {
-    T val = wave->evaluate(phase + *pm());
+    typename W::SampleType val = waveform.evaluate(phase + *pm());
     phase += (*fHz() * math::exp2(*fmExp()) + *fmLin()) * dt();
     phase = math::wrap01(phase);
     return val;

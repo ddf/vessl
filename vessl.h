@@ -102,7 +102,7 @@ namespace vessl
 
     virtual binary_t isFull() const = 0;
     virtual void write(const T& value) = 0;
-
+    sink& operator<<(const T& value) { write(value); return *this; }
     explicit operator binary_t() const { return !isFull(); }
   };
 
@@ -175,18 +175,17 @@ namespace vessl
 
       binary_t isFull() const override { return head == end; }
       void write(const T& v) override { *head++ = v; }
-
-      size_t available() const { return end - head; }
-
-      // block copy the entire contents of reader into this writer, returns this.
+      // block copy the entire contents of reader into this writer.
       // writer must have enough space for the contents of reader.
-      writer operator<<(const reader& r);
+      void write(const reader& r);
+      size_t available() const { return end - head; }
     };
 
     reader getReader() const { return reader(*this); }
     writer getWriter() { return writer(*this); }
 
-    array operator<<(array copyFrom);
+    // block copy this array to dest, which must be large enough to hold this array.
+    void copyTo(array dest);
 
     void fill(T value);
     // returns dest
@@ -396,6 +395,9 @@ namespace vessl
     virtual T process(const T& in) = 0;
     virtual void process(source<T>& in, sink<T>& out);
     virtual void process(array<T> in, array<T> out);
+
+    // mainly added so we can write code using smoother in a similar way to OWL's SmoothFloat.
+    T operator<<(const T& in) { return process(in); }
   };
 
   template<typename T>
@@ -675,6 +677,9 @@ namespace vessl
     T sin(T x) { return ::sin(x); }
 
     template<typename T>
+    T cos(T x) { return ::cos(x); }
+
+    template<typename T>
     T sqrt(T x) { return ::sqrt(x); }
 
     template<typename T>
@@ -824,7 +829,7 @@ namespace vessl
           for (size_t i = 1; i < stages; i++)
           {
             array<T> dst(coeff + coeffSz*i, coeffSz);
-            dst << src;
+            src.copyTo(dst);
           }
         }
       };
@@ -1853,8 +1858,9 @@ namespace vessl
     process(r, w);
   }
 
+  // @todo ARM specialization
   template<typename T>
-  typename array<T>::writer array<T>::writer::operator<<(const reader& r)
+  void array<T>::writer::write(const reader& r)
   {
     size_t rsz = r.available();
     size_t wsz = available();
@@ -1862,15 +1868,14 @@ namespace vessl
     const T* rh = *r;
     memcpy(static_cast<void*>(head), static_cast<const void*>(rh), rsz * sizeof(T));
     head += rsz;
-    return writer(head, wsz - rsz);
   }
   
   template<typename T>
-  array<T> array<T>::operator<<(array copyFrom)
+  void array<T>::copyTo(array dest)
   {
-    writer w(*this);
-    w << reader(copyFrom);
-    return *this;
+    writer w(dest);
+    reader r(*this);
+    w.write(r);
   }
 
   template<typename T>
@@ -2535,11 +2540,10 @@ namespace vessl
   }
 
   template<>
-  array<float> array<float>::operator<<(array copyFrom)
+  void array<float>::copyTo(array dest)
   {
-    VASSERT(this->getSize() >= copyFrom.getSize(), "Not enough room in this array for contents of copyFrom");
-    arm_copy_f32(copyFrom.getData(), this->getData(), copyFrom.getSize());
-    return *this;
+    VASSERT(this->getSize() <=- dest.getSize(), "Not enough room in destination for this array");
+    arm_copy_f32(this->getData(), dest.getData(), this->getSize());
   }
   
   template<>

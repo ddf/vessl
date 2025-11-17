@@ -233,7 +233,7 @@ namespace vessl
       T samples[N];
       channels() : array<T>(samples, N) { array<T>::fill(0); }
       explicit channels(T m) : array<T>(samples, N) { array<T>::fill(m); }
-      channels(channels const& other) : array<T>(samples, N) { array<T>::copy(other); }
+      channels(channels const& other) : array<T>(samples, N) { other.copyTo(*this); }
       // @todo move and assignment operators
       
       channels<T, 1> toMono() const
@@ -401,6 +401,16 @@ namespace vessl
   };
 
   template<typename T>
+  class procGen : public generator<T>
+  {
+    processor<T>* proc;
+    generator<T>* gen; 
+  public:
+    explicit procGen(processor<T>* proc, generator<T>* gen) : proc(proc), gen(gen) {}
+    T generate() override { return proc->process(gen->generate()); }
+  };
+
+  template<typename T>
   class ring : array<T>
   {
     T* head;
@@ -507,7 +517,9 @@ namespace vessl
   
   template<typename T>
   bool operator!=(const parameter& p, const T& v) { return p.read<T>() != v; }
-  
+
+  // @todo consider removing these arithmetic overloads because they can be a source of bugs
+  // e.g.: analog read as digital because of the type of T resulting in unexpected type coercion behavior
   template<typename T>
   T operator+(const parameter& p, const T& v) { return p.read<T>() + v; }
   
@@ -585,6 +597,43 @@ namespace vessl
     template<size_t N>
     explicit unitProcessor(init<N>& init, analog_t sampleRate = 1) : unit(init, sampleRate), processor<T>() {}
     unitProcessor(const char_t* name, parameter* params, size_t paramsCount, analog_t sampleRate = 1) : unit(name, params, paramsCount, sampleRate), processor<T>() {}
+  };
+  
+  // a generator that outputs the unitGenerator G processed by the unitProcessor P.
+  // this should allow for building static effect chains like:
+  // unitProcGen<analog_t, vessl::slew, vessl::noiseGenerator>
+  // unitProcGen<analog_t, vessl::delay, vessl::unitProcGen<vessl::adsr, vessl::oscil>>
+  template<typename T, typename P, typename G>
+  class unitProcGen : public unit, public procGen<T>
+  {
+    unitProcessor<T>* uproc;
+    unitGenerator<T>* ugen;
+    
+    init<0> init = {
+      "procGen",
+      {
+      }
+    };
+
+  public:
+    explicit unitProcGen(P* uproc, G* ugen, analog_t sampleRate)
+    : unit(init, sampleRate)
+    , procGen<T>(uproc, ugen)
+    , uproc(uproc), ugen(ugen)
+    {
+      uproc->setSampleRate(sampleRate);
+      ugen->setSampleRate(sampleRate);
+    }
+
+    P* proc() { return static_cast<P*>(uproc); }
+    G* gen() { return static_cast<G*>(ugen); }
+
+  protected:
+    void onSampleRateChanged() override
+    {
+      uproc->setSampleRate(getSampleRate());
+      ugen->setSampleRate(getSampleRate());
+    }
   };
 
   namespace interpolation
@@ -750,6 +799,11 @@ namespace vessl
       analog_t operator()(analog_t t) const { return t; }
     };
 
+    struct smoothstep
+    {
+      analog_t operator()(analog_t t) const { return t * t * (3.0f - 2.0f * t); }
+    };
+
     namespace quad
     {
       struct in { analog_t operator()(analog_t t) const { return t * t; } };
@@ -784,6 +838,80 @@ namespace vessl
 
     template<typename T>
     T lerp(T begin, T end, analog_t t) { return interp<linear, T>(begin, end, t); }
+  }
+
+  // analog unipolar noise generators that generate values in the range [0,1]
+  namespace noise
+  {
+    struct white
+    {
+      explicit white(analog_t sampleRate) {}
+      analog_t operator()() const { return random::range<analog_t>(0, 1); }
+    };
+
+    // Implements the Voss algorithm (see: http://www.firstpr.com.au/dsp/pink-noise/)
+    // Would be good to dig into the improvements on the algorithm mentioned later in the article.
+    struct pink
+    {
+    private:
+      static constexpr int RANGE = 128;
+      static constexpr int COUNT = 6;
+      static constexpr int MAX_KEY = 0x1f;
+
+      int key = 0;
+      analog_t maxSum = 90;
+      uint32_t whiteValues[COUNT] = {
+        random::u32() % (RANGE / COUNT), random::u32() % (RANGE / COUNT), random::u32() % (RANGE / COUNT),
+        random::u32() % (RANGE / COUNT), random::u32() % (RANGE / COUNT), random::u32() % (RANGE / COUNT)
+      };
+      
+    public:
+      explicit pink(analog_t sampleRate) {}
+      
+      analog_t operator()()
+      {
+        int lastKey = key;
+        analog_t sum = 0;
+        key = key == MAX_KEY ? 0 : ++key;
+
+        int diff = lastKey ^ key;
+        for (int i = 0; i < COUNT; ++i)
+        {
+          if ((diff & (1 << i)) != 0)
+          {
+            whiteValues[i] = random::u32() % (RANGE / COUNT);
+          }
+          sum += static_cast<analog_t>(whiteValues[i]);
+        }
+        maxSum = math::max(sum, maxSum);
+        analog_t n = sum / maxSum;
+        // vassert(!math::isNan(n) && "pink noise generated nan");
+        return n;
+      }
+    };
+
+    // Brownian noise (i.e. random wander) run thru a DC blocking filter.
+    // See: https://www.dsprelated.com/freebooks/filters/DC_Blocker.html
+    struct red
+    {
+      explicit red(analog_t sampleRate) : r((sampleRate-2.0f)/sampleRate), rc((1.0f - r)*200), x1(0), y1(0) {}
+      
+      analog_t operator()()
+      {
+        analog_t white = random::range<analog_t>(-rc, rc);
+        analog_t x = y1 + white;
+        // only run the filter when we get close to going out of range
+        // to compensate for wandering away from 0.
+        y1 = x < -0.49 || x > 0.49f ? x - x1 + r*y1 : x;
+        x1 = x;
+        return y1 + 0.5f;
+      }
+
+    private:
+      analog_t r;
+      analog_t rc;
+      analog_t x1, y1;
+    };
   }
   
   namespace mixing
@@ -931,7 +1059,7 @@ namespace vessl
     static constexpr analog_t B2F = 1.0 / 60.0;  // NOLINT(clang-diagnostic-implicit-float-conversion)
     static constexpr analog_t F2B = 60;
 
-    // can be used by units an indication for how to treat changes in time values (see: delay & freeze)
+    // can be used by units as an indication for how to treat changes in time values (see: delay & freeze)
     enum class mode : uint8_t
     {
       snap, // use duration value directly
@@ -1063,37 +1191,31 @@ namespace vessl
     T evaluate(analog_t phase) const override;
   };
 
-  // @todo refactor this to work like interpolation?
-  enum class noiseTint : uint8_t
-  {
-    white,
-    pink,
-    red,
-    brown,
-  };
 
-  template<typename T>
+  // generates stepped analog noise at rate values per second.
+  template<typename T, typename N>
   class noiseGenerator final : public unitGenerator<T>
   {
-    unit::init<2> init = {
+    unit::init<1> init = {
       "noise",
       {
-        parameter("tint", parameter::type::digital),
         parameter("rate", parameter::type::analog)
       }
     };
+    N noise;
+    analog_t value;
+    analog_t next;
     analog_t step;
-    T nz[2];
-
+    
     using unit::dt;
 
   public:
-    explicit noiseGenerator(analog_t sampleRate, noiseTint withTint = noiseTint::white)
-    : unitGenerator<T>(init, sampleRate), step(0)
+    explicit noiseGenerator(analog_t sampleRate = 1)
+    : unitGenerator<T>(init, sampleRate), noise(sampleRate), step(0)
     {
-      nz[0] = nz[1] = next(withTint, 0);
-      tint() << withTint;
-      rate() << 1.0;
+      value = noise();
+      next = noise();
+      rate() << sampleRate;
     }
     noiseGenerator(const noiseGenerator&) = default;
     noiseGenerator(noiseGenerator&&) = default;
@@ -1101,12 +1223,14 @@ namespace vessl
     noiseGenerator& operator=(noiseGenerator&&) = default;
     ~noiseGenerator() override = default;
 
-    parameter& tint() { return init.params[0]; }
-    parameter& rate() { return init.params[1]; }
+    parameter& rate() { return init.params[0]; }
 
-    static T next(noiseTint tint, double dt);
-
+    // generates stepped noise in the range [0,1] at the given rate
     T generate() override;
+
+    // smooths the stepped noise with the given easing
+    template<typename E>
+    T generate();
   };
 
   // unit that generates a linear ramp from one value to another over a duration of seconds
@@ -1339,7 +1463,7 @@ namespace vessl
       return currentStageIdx == 1 ? decayStage.eos() && !gateOn : envelope<T>::shouldAdvance(currentStageIdx);
     }
   };
-
+  
   template<typename T>
   class slew : public unitProcessor<T>
   {
@@ -2183,81 +2307,25 @@ namespace vessl
     return interpolation::sample<T, I>(buffer, idx);
   }
 
-  template<typename T>
-  T noiseGenerator<T>::next(noiseTint tint, double dt)
+  template<typename T, typename N>
+  T noiseGenerator<T, N>::generate()
   {
-    switch (tint)
+    step += dt() * rate().readAnalog();
+    if (step >= 1)
     {
-      case noiseTint::white:
-      {
-        return 2 * random::range<T>(0, 1) - 1;
-      }
-
-      // #TODO: this contains clicks when run at audio frequency and I'm not sure why.
-      // Need to either read up on how to do this properly and write a new implementation,
-      // or find some open source code that can be used without causing license issues.
-      case noiseTint::red:
-      case noiseTint::brown:
-      {
-        static const T RC = static_cast<T>(1) / (math::pi<T> * 200);
-        static const T AC = 6.2;
-        static T prev = 0;
-        analog_t alpha = dt / (dt + RC);
-        T white = 2 * random::range(0, 1) - 1;
-        prev = easing::lerp(prev, white, alpha);
-        return prev * AC;
-      }
-
-        // This is the Voss algorithm (see: http://www.firstpr.com.au/dsp/pink-noise/)
-        // Would be good to dig into the improvements on the algorithm mentioned later in the article.
-      case noiseTint::pink:
-      {
-        static constexpr int RANGE = 128;
-        static constexpr int MAX_KEY = 0x1f;
-        static int key = 0;
-        static T maxSum = 90;
-        static uint32_t whiteValues[6] = {
-          random::u32() % (RANGE / 6), random::u32() % (RANGE / 6), random::u32() % (RANGE / 6),
-          random::u32() % (RANGE / 6), random::u32() % (RANGE / 6), random::u32() % (RANGE / 6)
-        };
-
-        int lastKey = key;
-        T sum = 0;
-        key = key == MAX_KEY ? 0 : ++key;
-
-        int diff = lastKey ^ key;
-        for (int i = 0; i < 6; ++i)
-        {
-          if ((diff & (1 << i)) != 0)
-          {
-            whiteValues[i] = random::u32() % (RANGE / 6);
-          }
-          sum += whiteValues[i];
-        }
-        maxSum = math::max(sum, maxSum);
-        T n = 2 * (sum / maxSum) - 1;
-        vassert(!math::isNan(n) && "pink noise generated nan");
-        return n;
-      }
+      value = next;
+      next = noise();
+      step = math::wrap01(step);
     }
-
-    return 0;
+    return value;
   }
 
-  template<typename T>
-  T noiseGenerator<T>::generate()
+  template<typename T, typename N>
+  template<typename E>
+  T noiseGenerator<T, N>::generate()
   {
-    step += dt() * rate().read();
-    analog_t alpha = step / dt();
-    if (alpha >= 1)
-    {
-      noiseTint tnt = static_cast<noiseTint>(tint());
-      nz[0] = nz[1];
-      nz[1] = next(tnt, dt());
-      alpha = math::wrap01(alpha);
-      step = alpha * dt();
-    }
-    return lerp(nz[0], nz[1], alpha);
+    T s = generate();
+    return easing::interp<E>(s, next, step);
   }
 
   template<typename T>

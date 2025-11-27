@@ -2442,13 +2442,23 @@ namespace vessl
   template<typename T>
   T slew<T>::process(const T& v)
   {
-    binary_t isRise = v > value+epsilon;
-    binary_t isFall = v < value-epsilon;
-    analog_t rate = isRise ? *rise() : isFall ? -1.0f*fall() : (v-value)*getSampleRate();
-    value += rate*dt();
+    binary_t isRise = v > mValue+epsilon;
+    binary_t isFall = v < mValue-epsilon;
+    if (isRise)
+    {
+      mValue = math::min(v, mValue + rise()*dt());
+    }
+    else if (isFall)
+    {
+      mValue = math::max(v, mValue - fall()*dt());
+    }
+    else
+    {
+      mValue = v;
+    }
     rw() << isRise;
     fw() << isFall;
-    return value;
+    return mValue;
   }
 
   template<class W>

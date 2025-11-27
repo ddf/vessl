@@ -700,7 +700,10 @@ namespace vessl
     T log10(T v) { return ::log10(v); }
     
     template<typename T>
-    T max(T a, T b) { return a > b ? a : b; }
+    T max(const T& a, const T& b) { return a > b ? a : b; }
+
+    template<typename T>
+    T min(const T& a, const T& b) { return a < b ? a : b; }
 
     template<typename T>
     T mod(T v, T* i) { return ::modf(v, i); }
@@ -927,6 +930,18 @@ namespace vessl
   
   namespace filtering
   {
+    namespace q
+    {
+      template<typename T>
+      constexpr T butterworth() { return static_cast<T>(0.70710678118); } // 1/sqrt(2)
+
+      template<typename T>
+      constexpr T sallenKey() { return static_cast<T>(0.5); } 
+
+      template<typename T>
+      constexpr T bessel() { return static_cast<T>(0.57735026919); } // 1/sqrt(3)
+    }
+    
     template<typename T>
     struct data
     {
@@ -1879,7 +1894,7 @@ namespace vessl
     using unit::dt;
 
   public:
-    filter(analog_t sampleRate, analog_t cutoffInHz, analog_t kyu = 0) : unitProcessor<T>(init, sampleRate)
+    filter(analog_t sampleRate, analog_t cutoffInHz, analog_t kyu = filtering::q::butterworth<T>()) : unitProcessor<T>(init, sampleRate)
     , piosr(math::pi<analog_t>()/sampleRate)
     { cutoff() << cutoffInHz; q() << kyu; }
 
@@ -1889,14 +1904,14 @@ namespace vessl
     T process(const T& in) override
     {
       T out;
-      function.set(*cutoff()*piosr, *q());
+      function.set(*cutoff()*piosr, math::max(*q(), static_cast<analog_t>(0.01)));
       function.process(&in, &out, 1);
       return out;
     }
     
     void process(array<T> in, array<T> out) override
     {
-      function.set(*cutoff()*piosr, *q());
+      function.set(*cutoff()*piosr, math::max(*q(), static_cast<analog_t>(0.01)));
       function.process(in.getData(), out.getData(), in.getSize());
     }
 

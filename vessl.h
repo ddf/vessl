@@ -401,14 +401,20 @@ namespace vessl
   };
 
   template<typename T>
-  class procGen : public generator<T>
+  struct procGen : generator<T>
   {
     processor<T>* proc;
     generator<T>* gen; 
-  public:
-    explicit procGen(processor<T>* proc, generator<T>* gen) : proc(proc), gen(gen) {}
+  
+    explicit procGen(processor<T>& proc, generator<T>& gen) : proc(&proc), gen(&gen) {}
     T generate() override { return proc->process(gen->generate()); }
   };
+
+  template<typename T>
+  T operator<<(processor<T>& proc, generator<T>& gen)
+  {
+    return proc.process(gen.generate());
+  }
 
   template<typename T>
   class ring : array<T>
@@ -597,43 +603,6 @@ namespace vessl
     template<size_t N>
     explicit unitProcessor(init<N>& init, analog_t sampleRate = 1) : unit(init, sampleRate), processor<T>() {}
     unitProcessor(const char_t* name, parameter* params, size_t paramsCount, analog_t sampleRate = 1) : unit(name, params, paramsCount, sampleRate), processor<T>() {}
-  };
-  
-  // a generator that outputs the unitGenerator G processed by the unitProcessor P.
-  // this should allow for building static effect chains like:
-  // unitProcGen<analog_t, vessl::slew, vessl::noiseGenerator>
-  // unitProcGen<analog_t, vessl::delay, vessl::unitProcGen<vessl::adsr, vessl::oscil>>
-  template<typename T, typename P, typename G>
-  class unitProcGen : public unit, public procGen<T>
-  {
-    unitProcessor<T>* uproc;
-    unitGenerator<T>* ugen;
-    
-    init<0> init = {
-      "procGen",
-      {
-      }
-    };
-
-  public:
-    explicit unitProcGen(P* uproc, G* ugen, analog_t sampleRate)
-    : unit(init, sampleRate)
-    , procGen<T>(uproc, ugen)
-    , uproc(uproc), ugen(ugen)
-    {
-      uproc->setSampleRate(sampleRate);
-      ugen->setSampleRate(sampleRate);
-    }
-
-    P* proc() { return static_cast<P*>(uproc); }
-    G* gen() { return static_cast<G*>(ugen); }
-
-  protected:
-    void onSampleRateChanged() override
-    {
-      uproc->setSampleRate(getSampleRate());
-      ugen->setSampleRate(getSampleRate());
-    }
   };
 
   namespace interpolation

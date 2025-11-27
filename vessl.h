@@ -1467,16 +1467,17 @@ namespace vessl
   template<typename T>
   class slew : public unitProcessor<T>
   {
-    T value;
+    T mValue;
     T epsilon;
     
-    unit::init<4> init = {
+    unit::init<5> init = {
       "slew",
       {
         parameter("rise", parameter::type::analog),
         parameter("fall", parameter::type::analog),
         parameter("rising", parameter::type::binary),
-        parameter("falling", parameter::type::binary)
+        parameter("falling", parameter::type::binary),
+        parameter("value", &mValue)
       }
     };
 
@@ -1490,13 +1491,14 @@ namespace vessl
     // note: choice of epsilon will depend on the amount of noise in the signal to be slewed.
     // the default value was chosen based on testing with an OWL module's audio input.
     slew(analog_t sampleRate, analog_t riseRate, analog_t fallRate, T initialValue = T(0), T epsilon = math::epsilon<T>()*1000)
-    : unitProcessor<T>(init, sampleRate), value(initialValue), epsilon(epsilon)
+    : unitProcessor<T>(init, sampleRate), mValue(initialValue), epsilon(epsilon)
     { rise() << riseRate; fall() << fallRate; }
 
     parameter& rise() { return init.params[0]; }
     parameter& fall() { return init.params[1]; }
     const parameter& rising() const { return init.params[2]; }
     const parameter& falling() const { return init.params[3]; }
+    const parameter& value() const { return init.params[4]; }
 
     T process(const T& v) override;
 

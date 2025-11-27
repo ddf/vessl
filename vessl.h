@@ -119,6 +119,24 @@ namespace vessl
   };
 
   template<typename T>
+  T operator*(generator<T>& lhs, generator<T>& rhs)
+  {
+    return lhs.generate() * rhs.generate();
+  }
+
+  template<typename T>
+  T operator*(const T& lhs, generator<T>& rhs)
+  {
+    return lhs * rhs.generate();
+  }
+
+  template<typename T>
+  T operator*(generator<T>& lhs, const T& rhs)
+  {
+    return lhs.generate() * rhs;
+  }
+
+  template<typename T>
   class array
   {
   protected:
@@ -177,6 +195,7 @@ namespace vessl
       void write(const T& v) override { *head++ = v; }
       // block copy the entire contents of reader into this writer.
       // writer must have enough space for the contents of reader.
+      // ReSharper disable once CppEnforceOverridingFunctionStyle
       void write(const reader& r);
       size_t available() const { return end - head; }
     };

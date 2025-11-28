@@ -417,7 +417,34 @@ namespace vessl
 
     // mainly added so we can write code using smoother in a similar way to OWL's SmoothFloat.
     T operator<<(const T& in) { return process(in); }
+
+    struct block : source<T>
+    {
+      processor<T>* proc;
+      source<T>* in;
+      block(processor<T>& proc, source<T>& in) : proc(&proc), in(&in) {}
+      binary_t isEmpty() const override { return in->isEmpty(); }
+      T read() override { return in->read(); }
+      void operator>>(sink<T>& out) { proc->process(*in, out); }
+      void operator>>(array<T> out) { typename array<T>::writer w = out.getWriter(); proc->process(*in, w); }
+    };
+
+    block operator<<(source<T>& in) { return block(*this,in); }
+    
+    struct arrayblock : block
+    {
+      typename array<T>::reader ar;
+      arrayblock(processor<T>& proc, array<T> in) : block(proc, ar), ar(in) {}
+    };
+
+    arrayblock operator<<(array<T> in) { return arrayblock(*this,in); }
   };
+
+  template<typename T>
+  typename processor<T>::block operator>>(source<T>& in, processor<T>& processor) { return processor << in; }
+
+  template<typename T>
+  typename processor<T>::arrayblock operator>>(array<T> in, processor<T>& processor) { return processor << in; }
 
   template<typename T>
   struct procGen : generator<T>
@@ -657,13 +684,13 @@ namespace vessl
   // template specializations are provided for ARM_CORTEX where applicable.
   namespace math
   {
-    template<class T>
+    template<typename T>
     constexpr T e() { return static_cast<T>(2.71828182845904523536); }
     
-    template<class T>
+    template<typename T>
     constexpr T pi() { return static_cast<T>(3.1415926535897932385); }
 
-    template<class T>
+    template<typename T>
     constexpr T twoPi() { return pi<T>() * 2; }
 
     template<typename T>
@@ -721,6 +748,9 @@ namespace vessl
 
     template<typename T>
     T sqrt(T x) { return ::sqrt(x); }
+    
+    template<typename T>
+    T sqrt2() { static T v = sqrt(2); return v; }
 
     template<typename T>
     T tan(T x) { return ::tan(x); }
@@ -764,23 +794,24 @@ namespace vessl
     }
   }
   
+  // stored as decibels (0 = unity gain).
   class gain
   {
-    analog_t value;
-    explicit gain(analog_t v) : value(v) {}
+    analog_t db;
+    explicit gain(analog_t v) : db(v) {}
   public:
     static analog_t decibelsToScale(analog_t db) { return math::exp10(db*static_cast<analog_t>(0.05));}
     static analog_t scaleToDecibels(analog_t scale) { return math::log10(scale)*static_cast<analog_t>(20.0);}
-    static gain fromScale(analog_t scale) { return gain(scale); }
-    static gain fromDecibels(analog_t dB) { return gain(decibelsToScale(dB)); }
+    static gain fromScale(analog_t scale) { return gain(scaleToDecibels(scale)); }
+    static gain fromDecibels(analog_t dB) { return gain(dB); }
 
     // implement casting operators so that gain can be used as a parameter type.
-    explicit operator binary_t() const { return value > 0; }
-    explicit operator digital_t() const { return static_cast<digital_t>(toDecibels()); }
-    explicit operator analog_t() const { return value; }
+    explicit operator binary_t() const { return db >= 0; }
+    explicit operator digital_t() const { return static_cast<digital_t>(db); }
+    explicit operator analog_t() const { return db; }
 
-    analog_t toScale() const { return value; }
-    analog_t toDecibels() const { return scaleToDecibels(value); }
+    analog_t toScale() const { return decibelsToScale(db); }
+    analog_t toDecibels() const { return db; }
   };
   
   namespace easing
@@ -944,103 +975,101 @@ namespace vessl
       size_t getStateSize() const { return state.getSize(); }
     };
 
-    // based on https://www.earlevel.com/main/2012/11/26/biquad-c-source-code/ 
-    namespace biquad
+    // based on https://www.earlevel.com/main/2012/11/26/biquad-c-source-code/
+    template<size_t STAGES>
+    struct biquad
     {
-      template<size_t STAGES>
-      struct type
-      {
-        static constexpr size_t stages = STAGES;
-        
-        template<typename T>
-        void copy(T* coeff)
-        {
-          static constexpr size_t coeffSz = 5;
-          array<T> src(coeff, coeffSz);
-          for (size_t i = 1; i < stages; i++)
-          {
-            array<T> dst(coeff + coeffSz*i, coeffSz);
-            src.copyTo(dst);
-          }
-        }
-      };
-
-      template<size_t STAGES = 1>
-      struct lp : type<STAGES>
-      {
-        template<typename T>
-        void operator()(T* coeff, T omega, T q, size_t stages = 1)
-        {
-          T K = math::tan(omega);
-          T ralpha = 1 / (1 + K / q + K * K);
-          coeff[0] = K * K * ralpha;
-          coeff[1] = 2 * coeff[0];
-          coeff[2] = coeff[0];
-          coeff[3] = - 2 * (K * K - 1) * ralpha;
-          coeff[4] = - (1 - K / q + K * K) * ralpha;
-          // copy calculated coefficients to all stages
-          if (stages > 1)
-          {
-            type<STAGES>::copy(coeff);
-          }
-        }
-      };
-
-      template<size_t STAGES = 1>
-      struct hp : type<STAGES>
-      { 
-        template<typename T>
-        void operator()(T* coeff, T omega, T q)
-        {
-          T K = math::tan(omega);
-          T ralpha = 1 / (1 + K / q + K * K);
-          coeff[0] = 1 * ralpha;
-          coeff[1] = -2 * coeff[0];
-          coeff[2] = coeff[0];
-          coeff[3] = - 2 * (K * K - 1) * ralpha;
-          coeff[4] = - (1 - K / q + K * K) * ralpha;
-          // copy calculated coefficients to all stages
-          if (STAGES > 1)
-          {
-            type<STAGES>::copy(coeff);
-          }
-        }
-      };
-
-      template<typename T, size_t STATES, size_t STAGES>
+      static constexpr size_t COEFF_NUM = 5;
+      
+      template<typename T, size_t STATES>
       struct cascade : data<T>
       {
       private:
-        T co[5*STAGES];
+        T co[COEFF_NUM*STAGES];
         T st[STATES*STAGES];
       public:
-        cascade() : data<T>(co, 5*STAGES, st, STATES*STAGES) {}
+        cascade() : data<T>(co, COEFF_NUM*STAGES, st, STATES*STAGES) {}
+      };
+      
+      template<typename T, class FilterType>
+      struct df2T : cascade<T, 2>
+      {
+        FilterType filterFunc;
+        
+        using cascade<T, 2>::coeff;
+        using cascade<T, 2>::state;
+        using cascade<T, 2>::getCoeffSize;
+        using cascade<T, 2>::getStateSize;
+        
+        void set(T omega, T q, gain g);
+        void process(const T* source, T* dest, size_t blockSize);
+        size_t getStageCount() const { return STAGES; }
       };
 
-      // @todo want to be able to have class... Fs in the template parameter list
-      // so that it is possible to declare df2T types that mix biquad::types
-      // e.g.: df2T<float, bp<2>, notch<2>>
-      // might need to use std::tuple to do this, by either subclassing
-      // or having calc be a tuple.
-      // we would then also need cascade to be a member, rather than directly subclassing.
-      // another possibility would be to requires STAGES in the template parameter list
-      // and then add calc and stage parameters to set.
-      // this might be nice for mixed-use because one might not want all of the Fcs to be the same.
-      template<typename T, class F>
-      struct df2T : cascade<T, 2, F::stages>
+      template<typename T>
+      static void copy(T* coeff);
+
+      template<typename T>
+      struct lowPass
       {
-        F calc;
-        
-        using cascade<T, 2, F::stages>::coeff;
-        using cascade<T, 2, F::stages>::state;
-        using cascade<T, 2, F::stages>::getCoeffSize;
-        using cascade<T, 2, F::stages>::getStateSize;
-        
-        void set(T omega, T q);
+        struct func { void operator()(T* coeff, T omega, T q, gain _); };
+        df2T<T, func> df2;
+        void set(T omega, T q, gain g) { df2.set(omega, q, g); }
+        void process(const T* source, T* dest, size_t blockSize) { df2.process(source, dest, blockSize); }
+      };
 
-        size_t getStageCount() const { return F::stages; }
+      template<typename T>
+      struct highPass
+      { 
+        struct func { void operator()(T* coeff, T omega, T q, gain _); };
+        df2T<T, func> df2;
+        void set(T omega, T q, gain g) { df2.set(omega, q, g); }
+        void process(const T* source, T* dest, size_t blockSize) { df2.process(source, dest, blockSize); }
+      };
 
-        void process(const T* source, T* dest, size_t blockSize);
+      template<typename T>
+      struct bandPass
+      {
+        struct func { void operator()(T* coeff, T omega, T q, gain _); };
+        df2T<T, func> df2;
+        void set(T omega, T q, gain g) { df2.set(omega, q, g); }
+        void process(const T* source, T* dest, size_t blockSize) { df2.process(source, dest, blockSize); } 
+      };
+        
+      template<typename T>
+      struct notch
+      {
+        struct func { void operator()(T* coeff, T omega, T q, gain _); };
+        df2T<T, func> df2;
+        void set(T omega, T q, gain g) { df2.set(omega, q, g); }
+        void process(const T* source, T* dest, size_t blockSize) { df2.process(source, dest, blockSize); }
+      };
+        
+      template<typename T>
+      struct peak
+      {
+        struct func { void operator()(T* coeff, T omega, T q, gain g); };
+        df2T<T, func> df2;
+        void set(T omega, T q, gain g) { df2.set(omega, q, g); }
+        void process(const T* source, T* dest, size_t blockSize) { df2.process(source, dest, blockSize); }
+      };
+        
+      template<typename T>
+      struct lowShelf
+      {
+        struct func { void operator()(T* coeff, T omega, T _, gain g); };
+        df2T<T, func> df2;
+        void set(T omega, T q, gain g) { df2.set(omega, q, g); }
+        void process(const T* source, T* dest, size_t blockSize) { df2.process(source, dest, blockSize); }
+      };
+        
+      template<typename T>
+      struct highShelf
+      {
+        struct func { void operator()(T* coeff, T omega, T _, gain g); };
+        df2T<T, func> df2;
+        void set(T omega, T q, gain g) { df2.set(omega, q, g); }
+        void process(const T* source, T* dest, size_t blockSize) { df2.process(source, dest, blockSize); }
       };
     };
   }
@@ -1865,42 +1894,53 @@ namespace vessl
     }
   };
 
-  template<typename T, typename F>
+  // unit for use with filter types defined in the filtering namespace.
+  // For example, for a 2 stage biquad low pass filter use:
+  // filter<float, filtering::biquad::type<2>::lowPass>
+  template<typename T, template<typename> typename H>
   class filter : public unitProcessor<T>
   {
-    unit::init<2> init = {
+  public:
+    typedef H<T> function;
+    
+  private:
+    gain mGain;
+    unit::init<3> init = {
       "filter",
       {
         parameter("cutoff", parameter::type::analog),
-        parameter("q", parameter::type::analog)
+        parameter("q", parameter::type::analog),
+        parameter("emphasis", &mGain)
       }
     };
     
-    F function;
+    function func;
     analog_t piosr;
     
     using unit::dt;
 
   public:
-    filter(analog_t sampleRate, analog_t cutoffInHz, analog_t kyu = filtering::q::butterworth<T>()) : unitProcessor<T>(init, sampleRate)
-    , piosr(math::pi<analog_t>()/sampleRate)
+    filter(analog_t sampleRate, analog_t cutoffInHz, analog_t kyu = filtering::q::butterworth<T>(), gain emphasis = gain::fromDecibels(0) ) : unitProcessor<T>(init, sampleRate)
+    , mGain(emphasis), piosr(math::pi<analog_t>()/sampleRate)
     { cutoff() << cutoffInHz; q() << kyu; }
 
     parameter& cutoff() { return init.params[0]; }
     parameter& q() { return init.params[1]; }
+    // unused by some filter types (see filtering section)
+    parameter& emphasis() { return init.params[2]; }
     
     T process(const T& in) override
     {
       T out;
-      function.set(*cutoff()*piosr, math::max(*q(), static_cast<analog_t>(0.01)));
-      function.process(&in, &out, 1);
+      func.set(*cutoff()*piosr, math::max(*q(), static_cast<analog_t>(0.01)), mGain);
+      func.process(&in, &out, 1);
       return out;
     }
     
     void process(array<T> in, array<T> out) override
     {
-      function.set(*cutoff()*piosr, math::max(*q(), static_cast<analog_t>(0.01)));
-      function.process(in.getData(), out.getData(), in.getSize());
+      func.set(*cutoff()*piosr, math::max(*q(), static_cast<analog_t>(0.01)), mGain);
+      func.process(in.getData(), out.getData(), in.getSize());
     }
 
   protected:
@@ -2218,23 +2258,25 @@ namespace vessl
     size_t x0 = idx;
     return -f * fm1 * fm2 * DIV6 * buffer[x0 - 1] + fp1 * fm1 * fm2 * DIV2 * buffer[x0] - fp1 * f * fm2 * DIV2 * buffer[x0 + 1] + fp1 * f * fm1 * DIV6 * buffer[x0 + 2];
   }
-  
-  template<typename T, typename F>
-  void filtering::biquad::df2T<T, F>::set(T omega, T q)
+
+  template<size_t STAGES>
+  template<typename T, class FilterType>
+  void filtering::biquad<STAGES>::df2T<T, FilterType>::set(T omega, T q, gain g)
   {
-    calc(coeff.getData(), omega, q);
+    filterFunc(coeff.getData(), omega, q, g);
   }
   
-  template<typename T, typename F>
-  void filtering::biquad::df2T<T, F>::process(const T* source, T* dest, size_t blockSize)
+  template<size_t STAGES>
+  template<typename T, class FilterType>
+  void filtering::biquad<STAGES>::df2T<T, FilterType>::process(const T* source, T* dest, size_t blockSize)
   {
     const T* input = source;
-    typename array<T>::reader cor(coeff, getCoeffSize());
-    for (size_t s = 0; s < getStageCount(); s++)
+    typename array<T>::reader cor = coeff.getReader();
+    for (size_t s = 0; s < STAGES; s++)
     {
       T b0 = cor.read();  T b1 = cor.read(); T b2 = cor.read();
       T a1 = cor.read();  T a2 = cor.read();
-      T* st = state + 2*s;
+      T* st = state.getData() + 2*s;
       T d1 = st[0]; T d2 = st[1];
       typename array<T>::reader r(input, blockSize);
       typename array<T>::writer w(dest, blockSize);
@@ -2250,6 +2292,161 @@ namespace vessl
       st[1] = d2;
       input = dest;
     }
+  }
+
+  template<size_t STAGES>
+  template<typename T>
+  void filtering::biquad<STAGES>::copy(T* coeff) 
+  {
+    if (STAGES > 1)
+    {
+      array<T> src(coeff, COEFF_NUM);
+      for (size_t i = 1; i < STAGES; i++)
+      {
+        array<T> dst(coeff + COEFF_NUM*i, COEFF_NUM);
+        src.copyTo(dst);
+      }
+    }
+  }
+
+  template<size_t STAGES>
+  template<typename T>
+  void filtering::biquad<STAGES>::lowPass<T>::func::operator()(T* coeff, T omega, T q, gain _) 
+  {
+    T K = math::tan(omega);
+    T A = 1 / (1 + K / q + K * K);
+    coeff[0] = K * K * A;
+    coeff[1] = 2 * coeff[0];
+    coeff[2] = coeff[0];
+    coeff[3] = - 2 * (K * K - 1) * A;
+    coeff[4] = - (1 - K / q + K * K) * A;
+    copy<T>(coeff);
+  }
+
+  template<size_t STAGES>
+  template<typename T>
+  void filtering::biquad<STAGES>::highPass<T>::func::operator()(T* coeff, T omega, T q, gain _) 
+  {
+    T K = math::tan(omega);
+    T A = 1 / (1 + K / q + K * K);
+    coeff[0] = 1 * A;
+    coeff[1] = -2 * coeff[0];
+    coeff[2] = coeff[0];
+    coeff[3] = -2 * (K * K - 1) * A;
+    coeff[4] = -(1 - K / q + K * K) * A;
+    copy<T>(coeff);
+  }
+
+  template<size_t STAGES>
+  template<typename T>
+  void filtering::biquad<STAGES>::bandPass<T>::func::operator()(T* coeff, T omega, T q, gain _) 
+  {
+    T K = math::tan(omega);
+    T A = 1 / (1 + K / q + K * K);
+    coeff[0] = K / q * A;
+    coeff[1] = 0;
+    coeff[2] = -coeff[0];
+    coeff[3] = -2 * (K * K - 1) * A;
+    coeff[4] = -(1 - K / q + K * K) * A;
+    copy<T>(coeff);
+  }
+
+  template<size_t STAGES>
+  template<typename T>
+  void filtering::biquad<STAGES>::notch<T>::func::operator()(T* coeff, T omega, T q, gain _) 
+  {
+    T K = math::tan(omega);
+    T A = 1 / (1 + K / q + K * K);
+    coeff[0] = (1 + K * K) * A;
+    coeff[1] = 2 * (K * K - 1) * A;
+    coeff[2] = coeff[0];
+    coeff[3] = -coeff[1];
+    coeff[4] = - (1 - K / q + K * K) * A;
+    copy<T>(coeff);
+  }
+
+  template<size_t STAGES>
+  template<typename T>
+  void filtering::biquad<STAGES>::peak<T>::func::operator()(T* coeff, T omega, T q, gain g) 
+  {
+    T K = math::tan(omega);
+    T V = math::exp10(math::abs(g.toDecibels())/20);
+    T A;
+    if (g)
+    {
+      A = 1 / (1 + K / q + K * K);
+      coeff[0] = (1 + V/q * K + K * K) * A;
+      coeff[1] = 2 * (K * K - 1) * A;
+      coeff[2] = (1 - V/q * K + K * K) * A;
+      coeff[3] = -coeff[1];
+      coeff[4] = - (1 - K / q + K * K) * A;
+    }
+    else
+    {
+      A = 1 / (1 + V/q * K + K * K);
+      coeff[0] = (1 + K/q + K * K) * A;
+      coeff[1] = 2 * (K * K - 1) * A;
+      coeff[2] = (1 - K/q + K * K) * A;
+      coeff[3] = -coeff[1];
+      coeff[4] = - (1 - V/q * K + K * K) * A;
+    }
+    copy<T>(coeff);
+  }
+
+  template<size_t STAGES>
+  template<typename T>
+  void filtering::biquad<STAGES>::lowShelf<T>::func::operator()(T* coeff, T omega, T _, gain g) 
+  {
+    T K = math::tan(omega);
+    T V = math::exp10(math::abs(g.toDecibels())/20);
+    T A;
+    if (g)
+    {
+      A = 1 / (1 + math::sqrt2<T>() * K + K * K);
+      coeff[0] = (1 + math::sqrt(2*V) * K + V * K * K) * A;
+      coeff[1] = 2 * (V * K * K - 1) * A;
+      coeff[2] = (1 - math::sqrt(2*V) * K + V * K * K) * A;
+      coeff[3] = -2 * (K * K - 1) * A;
+      coeff[4] = -(1 - math::sqrt2<T>()*K + K * K) * A;
+    }
+    else
+    {
+      A = 1 / (1 + math::sqrt(2*V) * K + V * K * K);
+      coeff[0] = (1 + math::sqrt2<T>()*K + K * K) * A;
+      coeff[1] = 2 * (K * K - 1) * A;
+      coeff[2] = (1 - math::sqrt2<T>()*K + K * K) * A;
+      coeff[3] = -2 * (V * K * K - 1) * A;
+      coeff[4] = -(1 - math::sqrt(2*V) * K + V * K * K) * A;
+    }
+    copy<T>(coeff);
+  }
+
+  template<size_t STAGES>
+  template<typename T>
+  void filtering::biquad<STAGES>::highShelf<T>::func::operator()(T* coeff, T omega, T _, gain g) 
+  {
+    T K = math::tan(omega);
+    T V = math::exp10(math::abs(g.toDecibels())/20);
+    T A;
+    if (g)
+    {
+      A = 1 / (1 + math::sqrt2<T>() * K + K * K);
+      coeff[0] = (V + math::sqrt(2*V) * K + K * K) * A;
+      coeff[1] = 2 * (K * K - V) * A;
+      coeff[2] = (V - math::sqrt(2*V) * K + K * K) * A;
+      coeff[3] = -2 * (K * K - 1) * A;
+      coeff[4] = -(1 - math::sqrt2<T>()*K + K * K) * A;
+    }
+    else
+    {
+      A = 1 / (V + math::sqrt(2*V) * K + K * K);
+      coeff[0] = (1 + math::sqrt2<T>()*K + K * K) * A;
+      coeff[1] = 2 * (K * K - 1) * A;
+      coeff[2] = (1 - math::sqrt2<T>()*K + K * K) * A;
+      coeff[3] = -2 * (K * K - V) * A;
+      coeff[4] = -(V - math::sqrt(2*V) * K + K * K) * A;
+    }
+    copy<T>(coeff);
   }
 
   template<typename T, size_t N, typename I>
@@ -2675,26 +2872,27 @@ namespace vessl
     return 0;
   }
   
-  template<typename F>
-  struct filtering::biquad::df2T<float, F> : cascade<float, 2, F::stages>
+  template<size_t STAGES>
+  template<class FilterType>
+  struct filtering::biquad<STAGES>::df2T<float, FilterType> : cascade<float, 2>
   {
-    F calc;
+    FilterType filterFunc;
     arm_biquad_cascade_df2T_instance_f32 inst;
           
-    using cascade<float, 2, F::stages>::coeff;
-    using cascade<float, 2, F::stages>::state;
-    using cascade<float, 2, F::stages>::getCoeffSize;
-    using cascade<float, 2, F::stages>::getStateSize;
-
+    using cascade<float, 2>::coeff;
+    using cascade<float, 2>::state;
+    using cascade<float, 2>::getCoeffSize;
+    using cascade<float, 2>::getStateSize;
+  
     df2T() { arm_biquad_cascade_df2T_init_f32(&inst, getStageCount(), coeff.getData(), state.getData()); }
           
-    void set(float omega, float q)
+    void set(float omega, float q, gain g)
     {
-      calc(coeff.getData(), omega, q);
+      filterFunc(coeff.getData(), omega, q, g);
     }
-
-    size_t getStageCount() const { return F::stages; }
-
+  
+    size_t getStageCount() const { return STAGES; }
+  
     void process(const float* source, float* dest, size_t blockSize)
     {
       arm_biquad_cascade_df2T_f32(&inst, source, dest, blockSize);

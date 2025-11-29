@@ -1,6 +1,6 @@
 ////////////////////////////////////////////////////////////////////////////////////
 //
-// Copyright (c) 2019 Damien Quartz
+// Copyright (c) 2025 Damien Quartz
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -28,6 +28,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 
 // When built for ARM Cortex-M processor series,
@@ -62,6 +63,9 @@ static void assert(bool condition) { }
 #endif
 
 #define VASSERT(cond, msg) assert((void(msg), cond))
+
+// again because Rider doesn't think memcpy is available even though we include <cstring>
+extern void* memcpy( void* dest, const void* src, std::size_t count );
 
 // Note: In all classes using typename T, it is assumed to be POD and to have support for all arithmetic operators
 namespace vessl
@@ -422,22 +426,6 @@ namespace vessl
 
   template<typename T>
   procSource<T> operator>>(array<T> in, processor<T>& proc) { return procSource<T>(proc, in); }
-
-  template<typename T>
-  struct procGen : generator<T>
-  {
-    processor<T>* proc;
-    generator<T>* gen; 
-  
-    explicit procGen(processor<T>& proc, generator<T>& gen) : proc(&proc), gen(&gen) {}
-    T generate() override { return proc->process(gen->generate()); }
-  };
-
-  template<typename T>
-  T operator<<(processor<T>& proc, generator<T>& gen)
-  {
-    return proc.process(gen.generate());
-  }
 
   template<typename T>
   class ring : array<T>

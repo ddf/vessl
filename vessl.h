@@ -1936,7 +1936,7 @@ namespace vessl
     unit::init<3> init = {
       "filter",
       {
-        parameter("cutoff", parameter::type::analog),
+        parameter("fHz", parameter::type::analog),
         parameter("q", parameter::type::analog),
         parameter("emphasis", &fargs.g)
       }
@@ -1947,14 +1947,14 @@ namespace vessl
   public:
     filter(analog_t sampleRate) : unitProcessor<T>(init, sampleRate)
     , fargs(sampleRate, 1, 1, gain::fromDecibels(0))
-    { cutoff() = fargs.hz, q() = fargs.q; }
+    { fHz() = fargs.hz, q() = fargs.q; }
     
     filter(analog_t sampleRate, analog_t cutoffInHz, analog_t kyu = filtering::q::butterworth<T>(), gain emphasis = gain::fromDecibels(0) ) 
     : unitProcessor<T>(init, sampleRate)
     , fargs(sampleRate, cutoffInHz, kyu, emphasis)
-    { cutoff() = fargs.hz; q() = fargs.q; }
+    { fHz() = fargs.hz; q() = fargs.q; }
 
-    parameter& cutoff() { return init.params[0]; }
+    parameter& fHz() { return init.params[0]; }
     parameter& q() { return init.params[1]; }
     // unused by some filter types (see filtering section)
     parameter& emphasis() { return init.params[2]; }
@@ -1962,7 +1962,7 @@ namespace vessl
     T process(const T& in) override
     {
       T out;
-      fargs.hz = static_cast<analog_t>(cutoff());
+      fargs.hz = static_cast<analog_t>(fHz());
       fargs.q = math::max(static_cast<analog_t>(q()), static_cast<analog_t>(0.01));
       func.process(&in, &out, 1, fargs);
       return out;
@@ -1970,7 +1970,7 @@ namespace vessl
     
     void process(array<T> in, array<T> out) override
     {
-      fargs.hz = static_cast<analog_t>(cutoff());
+      fargs.hz = static_cast<analog_t>(fHz());
       fargs.q = math::max(static_cast<analog_t>(q()), static_cast<analog_t>(0.01));
       func.process(in.getData(), out.getData(), in.getSize(), fargs);
     }

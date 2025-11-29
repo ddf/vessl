@@ -119,24 +119,6 @@ namespace vessl
   };
 
   template<typename T>
-  T operator*(generator<T>& lhs, generator<T>& rhs)
-  {
-    return lhs.generate() * rhs.generate();
-  }
-
-  template<typename T>
-  T operator*(const T& lhs, generator<T>& rhs)
-  {
-    return lhs * rhs.generate();
-  }
-
-  template<typename T>
-  T operator*(generator<T>& lhs, const T& rhs)
-  {
-    return lhs.generate() * rhs;
-  }
-
-  template<typename T>
   class array
   {
   protected:
@@ -166,6 +148,7 @@ namespace vessl
       const T* end;
 
     public:
+      explicit reader() : source<T>(), begin(nullptr), head(nullptr), end(nullptr) {}
       explicit reader(array source) : source<T>(), begin(source.data), head(source.data), end(source.data + source.size) {}
       reader(const T* data, size_t size) : source<T>(), begin(data), head(data), end(data + size) {}
 
@@ -414,37 +397,31 @@ namespace vessl
     virtual T process(const T& in) = 0;
     virtual void process(source<T>& in, sink<T>& out);
     virtual void process(array<T> in, array<T> out);
-
-    // mainly added so we can write code using smoother in a similar way to OWL's SmoothFloat.
-    T operator<<(const T& in) { return process(in); }
-
-    struct block : source<T>
-    {
-      processor<T>* proc;
-      source<T>* in;
-      block(processor<T>& proc, source<T>& in) : proc(&proc), in(&in) {}
-      binary_t isEmpty() const override { return in->isEmpty(); }
-      T read() override { return in->read(); }
-      void operator>>(sink<T>& out) { proc->process(*in, out); }
-      void operator>>(array<T> out) { typename array<T>::writer w = out.getWriter(); proc->process(*in, w); }
-    };
-
-    block operator<<(source<T>& in) { return block(*this,in); }
-    
-    struct arrayblock : block
-    {
-      typename array<T>::reader ar;
-      arrayblock(processor<T>& proc, array<T> in) : block(proc, ar), ar(in) {}
-    };
-
-    arrayblock operator<<(array<T> in) { return arrayblock(*this,in); }
   };
+  
+  template<typename T>
+  struct procSource : source<T>
+  {
+    typename array<T>::reader reader;
+    processor<T>* proc;
+    source<T>* in;
+    procSource(processor<T>& proc, source<T>& src) : reader(), proc(&proc), in(&src) {}
+    procSource(processor<T>& proc, array<T> arr) : reader(arr), proc(&proc), in(&reader) {}
+    binary_t isEmpty() const override { return in->isEmpty(); }
+    T read() override { return proc->process(in->read()); }
+    T& operator>>(T& rhs) { rhs = read(); return rhs; }
+    sink<T>& operator>>(sink<T>& out) { proc->process(*in, out); return out; }
+    array<T> operator>>(array<T> out) { typename array<T>::writer w = out.getWriter(); proc->process(*in, w); return out; }
+  };
+  
+  template<typename T>
+  procSource<T> operator>>(const T& in, processor<T>& proc) { return procSource<T>(proc, frame::channels<T,1>(in)); }
 
   template<typename T>
-  typename processor<T>::block operator>>(source<T>& in, processor<T>& processor) { return processor << in; }
+  procSource<T> operator>>(source<T>& in, processor<T>& proc) { return procSource<T>(proc, in); }
 
   template<typename T>
-  typename processor<T>::arrayblock operator>>(array<T> in, processor<T>& processor) { return processor << in; }
+  procSource<T> operator>>(array<T> in, processor<T>& proc) { return procSource<T>(proc, in); }
 
   template<typename T>
   struct procGen : generator<T>
@@ -502,39 +479,59 @@ namespace vessl
     const char_t* getName() const { return pn; }
     type getType() const { return pt; }
 
-    // for the sane, static cast from our stored type to T
+    // for built-in types: construct a T from our actual type.
+    // for user type: cast user pointer to T* and dereference.
     template<typename T>
     T read() const;
 
     binary_t readBinary() const { return read<binary_t>(); }
+    digital_t readDigital() const { return read<digital_t>(); }
+    analog_t readAnalog() const { return read<analog_t>(); }
+    
     explicit operator binary_t() const { return read<binary_t>(); }
+    explicit operator digital_t() const { return read<digital_t>(); }
+    explicit operator analog_t() const { return read<analog_t>(); }
     
     // read the actual state of a binary parameter, including sample delay
     // @todo rename to readBinaryRaw
     binary_t read(uint32_t* sampleDelay) const;
 
-    digital_t readDigital() const { return read<digital_t>(); }
-    analog_t readAnalog() const { return read<analog_t>(); }
-
-    // overloading dereference with analog conversion because it will be used so often
-    analog_t operator*() const { return read<analog_t>(); }
-
+    // for built-in types: static-cast T to parameter type before assign
+    // for user type: static-cast user pointer to T*, dereference, and assign.
     template<typename T>
     parameter& write(const T& value);
 
     // set the state of a binary parameter with a sample delay
     parameter& write(binary_t gate, uint32_t sampleDelay);
 
-    parameter& operator<<(const parameter& rhs)
+    // calls write with type of rhs,
+    // if rhs is a user parameter and this is a built-in type,
+    // reads value of rhs with our type.
+    // doesn't support writing from one user-parameter type to another.
+    parameter& operator=(const parameter& rhs)
     {
       switch (rhs.pt)
       {
         case type::binary: this->write(rhs.pv.b); break;
         case type::digital: this->write(rhs.pv.i); break;
         case type::analog: this->write(rhs.pv.a); break;
-        case type::user: VASSERT(false, "Can't copy a user parameter without knowing the type!"); break;
+        case type::user: 
+          switch (pt)
+          {
+            case type::binary: pv.b = rhs.read<binary_t>(); break;
+            case type::digital: pv.i = rhs.read<digital_t>(); break;
+            case type::analog: pv.a = rhs.read<analog_t>(); break;
+            case type::user: VASSERT(false, "Can't assign a user parameter to another user parameter without knowing at least one type!"); break;
+          }
       }
 
+      return *this;
+    }
+    
+    template<typename T>
+    parameter& operator=(const T& value)
+    {
+      write(value);
       return *this;
     }
 
@@ -551,12 +548,9 @@ namespace vessl
 
     type pt;
   };
-
-  template<typename T>
-  parameter& operator<<(parameter& p, const T& v) { return p.write(v); }
   
   template<typename T>
-  T& operator>>(parameter& p, T& v) { v = p.read<T>(); return v; }
+  procSource<T> operator>>(const parameter& p, processor<T>& proc) { return procSource<T>(proc, frame::channels<T, 1>(p.read<T>())); }
   
   template<typename T>
   bool operator>(const parameter& p, const T& v) { return p.read<T>() > v; }
@@ -569,20 +563,24 @@ namespace vessl
   
   template<typename T>
   bool operator!=(const parameter& p, const T& v) { return p.read<T>() != v; }
-
-  // @todo consider removing these arithmetic overloads because they can be a source of bugs
-  // e.g.: analog read as digital because of the type of T resulting in unexpected type coercion behavior
+  
   template<typename T>
   T operator+(const parameter& p, const T& v) { return p.read<T>() + v; }
   
   template<typename T>
-  T operator+(const T& v, const parameter& p) { return p.read<T>() + v; }
+  T operator+(const T& v, const parameter& p) { return v + p.read<T>(); }
+  
+  template<typename T>
+  T operator-(const parameter& p, const T& v) { return p.read<T>() - v; }
+  
+  template<typename T>
+  T operator-(const T& v, const parameter& p) { return v - p.read<T>(); }
   
   template<typename T>
   T operator*(const parameter& p, const T& v) { return p.read<T>() * v; }
   
   template<typename T>
-  T operator*(const T& v, const parameter& p) { return p.read<T>() * v; }
+  T operator*(const T& v, const parameter& p) { return v * p.read<T>(); }
   
   template<typename T>
   T operator/(const parameter& p, const T& v) { return p.read<T>() / v; }
@@ -710,6 +708,9 @@ namespace vessl
 
     template<typename T>
     T exp10(T v) { return ::exp10(v); }
+    
+    template<typename T>
+    T log(T v) { return ::log(v); }
 
     template<typename T>
     T log10(T v) { return ::log10(v); }
@@ -771,6 +772,19 @@ namespace vessl
 
     template<typename T>
     binary_t isNan(T n) { return isnan(n); }
+    
+    // xore because xor is a keyword
+    template<typename T>
+    T xore(const T& a, const T& b)
+    {
+      return a xor b;
+    }
+    
+    template<>
+    inline analog_t xore(const analog_t& a, const analog_t& b)
+    {
+      return xore(static_cast<digital_t>(a), static_cast<digital_t>(b));
+    }
   }
 
   namespace random
@@ -914,6 +928,7 @@ namespace vessl
 
     // Brownian noise (i.e. random wander) run thru a DC blocking filter.
     // See: https://www.dsprelated.com/freebooks/filters/DC_Blocker.html
+    // @todo still a bit crunchy
     struct red
     {
       explicit red(analog_t sampleRate) : r((sampleRate-2.0f)/sampleRate), rc((1.0f - r)*200), x1(0), y1(0) {}
@@ -1247,7 +1262,7 @@ namespace vessl
     {
       value = noise();
       next = noise();
-      rate() << sampleRate;
+      rate() = sampleRate;
     }
     noiseGenerator(const noiseGenerator&) = default;
     noiseGenerator(noiseGenerator&&) = default;
@@ -1288,7 +1303,7 @@ namespace vessl
     explicit ramp(analog_t sampleRate, analog_t durationInSeconds = 0, T fromValue = T(0), T toValue = T(0))
     : unitGenerator<T>(init, sampleRate), mFrom(fromValue), mTo(toValue), t(0)
     {
-      duration() << durationInSeconds;
+      duration() = durationInSeconds;
     }
     ramp(const ramp&) = default;
     ramp(ramp&&) = default;
@@ -1354,8 +1369,8 @@ namespace vessl
       // current value of the stage
       const parameter& value() const { return init.params[4]; }
 
-      void start(T fromValue) { begin = fromValue; mValue = fromValue; time = -unit::dt(); aw() << true; ew() << false; }
-      void reset() { aw() << false; ew() << false; time = -unit::dt(); mValue = 0; }
+      void start(T fromValue) { begin = fromValue; mValue = fromValue; time = -unit::dt(); aw() = true; ew() = false; }
+      void reset() { aw() = false; ew() = false; time = -unit::dt(); mValue = 0; }
 
       template<typename E>
       T generate() { return active() ? step<E>() : mValue; }
@@ -1416,7 +1431,7 @@ namespace vessl
 
   public:
     ad(analog_t attackDuration, analog_t decayDuration, analog_t sampleRate) : envelope<T>(&attackStage, 1, sampleRate), attackStage(sampleRate)
-    { attack().target() << T(1); attack().duration() << attackDuration; decay().duration() << decayDuration; }
+    { attack().target() = T(1); attack().duration() = attackDuration; decay().duration() = decayDuration; }
 
     typename envelope<T>::stage& attack() { return attackStage; }
     typename envelope<T>::stage& decay() { return envelope<T>::finalStage(); }
@@ -1442,7 +1457,7 @@ namespace vessl
 
     void gate(T value);
     void gate(binary_t on) { gate(on ? T(1) : T(0));}
-    void trigger() override { attack().target() << T(1); ad<T>::trigger(); gateOn = false; }
+    void trigger() override { attack().target() = T(1); ad<T>::trigger(); gateOn = false; }
     using envelope<T>::generate;
 
   protected:
@@ -1460,11 +1475,11 @@ namespace vessl
     adsr(analog_t attackDuration, analog_t decayDuration, analog_t sustainLevel, analog_t releaseDuration, analog_t sampleRate)
     : envelope<T>(&attackStage, 2, sampleRate), attackStage(sampleRate), decayStage(sampleRate), gateOn(false)
     {
-      attackStage.duration() << attackDuration;
-      attackStage.target() << T(1);
-      decayStage.duration() << decayDuration;
-      decayStage.target() << sustainLevel;
-      envelope<T>::finalStage().duration() << releaseDuration;
+      attackStage.duration() = attackDuration;
+      attackStage.target() = T(1);
+      decayStage.duration() = decayDuration;
+      decayStage.target() = sustainLevel;
+      envelope<T>::finalStage().duration() = releaseDuration;
     }
 
     typename envelope<T>::stage& attack() { return attackStage; }
@@ -1524,7 +1539,7 @@ namespace vessl
     // the default value was chosen based on testing with an OWL module's audio input.
     slew(analog_t sampleRate, analog_t riseRate, analog_t fallRate, T initialValue = T(0), T epsilon = math::epsilon<T>()*1000)
     : unitProcessor<T>(init, sampleRate), mValue(initialValue), epsilon(epsilon)
-    { rise() << riseRate; fall() << fallRate; }
+    { rise() = riseRate; fall() = fallRate; }
 
     parameter& rise() { return init.params[0]; }
     parameter& fall() { return init.params[1]; }
@@ -1549,13 +1564,22 @@ namespace vessl
       }
     };
   public:
-    explicit smoother(analog_t smoothingDegree = 0.9, T initialValue = T(0)) : unitProcessor<T>(init), mValue(initialValue)  // NOLINT(clang-diagnostic-implicit-float-conversion)
-    { degree() << smoothingDegree; }
+    explicit smoother(analog_t smoothingDegree = 0.9, T initialValue = T(0)) 
+    : unitProcessor<T>(init), mValue(initialValue)  // NOLINT(clang-diagnostic-implicit-float-conversion)
+    { degree() = smoothingDegree; }
 
     parameter& degree() { return init.params[0]; }
     const parameter& value() const { return init.params[1]; }
 
-    T process(const T& v) override { return mValue = easing::lerp(v, mValue, math::constrain<analog_t>(*degree(), 0.0, 1.0)); }
+    T process(const T& v) override
+    {
+      analog_t t = math::constrain<analog_t>(static_cast<analog_t>(degree()), 0.0, 1.0);
+      return mValue = easing::lerp(v, mValue, t);
+    }
+    
+    // so we can use this like OWL's SmoothValue
+    T operator<<(const T& v) { return process(v); }
+    
     // for block processing
     using unitProcessor<T>::process;
   };
@@ -1579,12 +1603,12 @@ namespace vessl
   public:
     using T = typename W::SampleType;
     
-    oscil() : unitGenerator<T>(init), phase(0) { fHz() << 440.0; }
+    oscil() : unitGenerator<T>(init), phase(0) { fHz() = 440.0; }
 
     template<typename... Ts>
     explicit oscil(analog_t sampleRate, analog_t freqInHz, Ts... wargs)
     : unitGenerator<T>(init, sampleRate), phase(0), waveform(wargs...)
-    { fHz() << freqInHz; }
+    { fHz() = freqInHz; }
 
     W waveform;
     
@@ -1650,7 +1674,7 @@ namespace vessl
     , buffer(buffer.getData(), buffer.getSize())
     {
       mDelayInSamples = mTime.samples;
-      feedback() << feedbackAmount;
+      feedback() = feedbackAmount;
     }
 
     delayline<T>& getbuffer() { return buffer; }
@@ -1753,7 +1777,7 @@ namespace vessl
   public:
     freeze(array<T> buffer, analog_t sampleRate) : unit(init, sampleRate), buffer(buffer.getData(), buffer.getSize())
     , mSize(buffer.getSize()-1), mPhase(0), crossfade(0.75f), freezeDelay(0), freezeSize(mSize.samples), readRate(1)
-    { rate() << 1.0; }
+    { rate() = 1.0; }
 
     delayline<T>& getBuffer() { return buffer; }
     const delayline<T>& getBuffer() const { return buffer; }
@@ -1769,10 +1793,10 @@ namespace vessl
 
     T generate() override
     {
-      freezeDelay = *position();
+      freezeDelay = static_cast<analog_t>(position());
       freezeSize  = mSize.samples;
       analog_t sampleDelay = freezeDelay + (1.0-mPhase)*freezeSize;
-      mPhase = math::wrap01(mPhase + *rate() / freezeSize);
+      mPhase = math::wrap01(mPhase + rate() / freezeSize);
       return buffer.template read<I>(sampleDelay);
     }
     
@@ -1824,9 +1848,9 @@ namespace vessl
 
       if (TimeMode == duration::mode::slew)
       {
-        analog_t fd = *position();
+        analog_t fd = position();
         analog_t fs = mSize.samples;
-        analog_t rt = *rate();
+        analog_t rt = rate();
         analog_t st = dt();
         while (w)
         {
@@ -1839,7 +1863,7 @@ namespace vessl
 
           if (UseInput)
           {
-            binary_t isEnabled = enabled().readBinary();
+            binary_t isEnabled = enabled();
             analog_t wetLevel = crossfade.process(isEnabled ? 1.0 : 0.0);
             T in = r.read();
             if (!isEnabled)
@@ -1857,10 +1881,10 @@ namespace vessl
 
       if (TimeMode == duration::mode::fade)
       {
-        analog_t fd0 = freezeDelay,   fd1 = *position();
+        analog_t fd0 = freezeDelay,   fd1 = position();
         analog_t fs0 = freezeSize,    fs1 = mSize.samples;
         analog_t fade = 0, fadeInc = 1.0 / output.getSize();
-        analog_t r0 = readRate, r1 = *rate();
+        analog_t r0 = readRate, r1 = rate();
         analog_t p0 = mPhase, dp0 = r0/fs0, dp1 = r1/fs1;
         while (w)
         {
@@ -1873,7 +1897,7 @@ namespace vessl
 
           if (UseInput)
           {
-            binary_t isEnabled = enabled().readBinary();
+            binary_t isEnabled = enabled();
             analog_t wetLevel = crossfade.process(isEnabled ? 1.0 : 0.0);
             T in = r.read();
             if (!isEnabled)
@@ -1922,7 +1946,7 @@ namespace vessl
   public:
     filter(analog_t sampleRate, analog_t cutoffInHz, analog_t kyu = filtering::q::butterworth<T>(), gain emphasis = gain::fromDecibels(0) ) : unitProcessor<T>(init, sampleRate)
     , mGain(emphasis), piosr(math::pi<analog_t>()/sampleRate)
-    { cutoff() << cutoffInHz; q() << kyu; }
+    { cutoff() = cutoffInHz; q() = kyu; }
 
     parameter& cutoff() { return init.params[0]; }
     parameter& q() { return init.params[1]; }
@@ -1932,14 +1956,14 @@ namespace vessl
     T process(const T& in) override
     {
       T out;
-      func.set(*cutoff()*piosr, math::max(*q(), static_cast<analog_t>(0.01)), mGain);
+      func.set(cutoff()*piosr, math::max(static_cast<analog_t>(q()), static_cast<analog_t>(0.01)), mGain);
       func.process(&in, &out, 1);
       return out;
     }
     
     void process(array<T> in, array<T> out) override
     {
-      func.set(*cutoff()*piosr, math::max(*q(), static_cast<analog_t>(0.01)), mGain);
+      func.set(cutoff()*piosr, math::max(static_cast<analog_t>(q()), static_cast<analog_t>(0.01)), mGain);
       func.process(in.getData(), out.getData(), in.getSize());
     }
 
@@ -1969,7 +1993,7 @@ namespace vessl
   public:
     bitcrush(analog_t sampleRate, analog_t bitRate, analog_t bitDepth = MaxBits)
       : unitProcessor<T>(init, sampleRate), prevInput(0), currSample(0), rateAlpha(0)
-    { rate() << bitRate; depth() << bitDepth; }
+    { rate() = bitRate; depth() = bitDepth; }
 
     parameter& rate() { return init.params[0]; }
     parameter& depth() { return init.params[1]; }
@@ -2189,9 +2213,9 @@ namespace vessl
       }
       case type::digital: return T(pv.i);
       case type::analog: return T(pv.a);
-      case type::user: return pv.u ? *static_cast<T*>(pv.u) : T(false);
+      case type::user: return pv.u ? *static_cast<T*>(pv.u) : T(0);
     }
-    return T(false);
+    return T(0);
   }
 
   template<typename T>
@@ -2512,7 +2536,7 @@ namespace vessl
   template<typename T, typename N>
   T noiseGenerator<T, N>::generate()
   {
-    step += dt() * rate().readAnalog();
+    step += dt() * rate();
     if (step >= 1)
     {
       value = next;
@@ -2533,15 +2557,15 @@ namespace vessl
   template<typename T>
   void ramp<T>::trigger()
   {
-    if (*duration() > math::epsilon<analog_t>())
+    if (duration() > math::epsilon<analog_t>())
     {
       t = 0;
-      eorw() << false;
+      eorw() = false;
     }
     else
     {
       t = 1;
-      eorw() << true;
+      eorw() = true;
     }
   }
 
@@ -2551,11 +2575,11 @@ namespace vessl
     analog_t lt = t;
     if (isActive())
     {
-      analog_t dinv = 1.0 / *duration();
+      analog_t dinv = 1.f / duration();
       t += dt() * dinv;
       if (t >= 1)
       {
-        eorw() << T(1);
+        eorw() = T(1);
       }
     }
     return easing::lerp(mFrom, mTo, lt);
@@ -2566,14 +2590,14 @@ namespace vessl
   T envelope<T>::stage::step()
   {
     analog_t dt = unit::dt();
-    analog_t s = unit::dt() / math::max<analog_t>(*duration(), dt);
+    analog_t s = unit::dt() / math::max<analog_t>(static_cast<analog_t>(duration()), dt);
     time += s;
     analog_t t = math::constrain<analog_t>(time, 0.0, 1.0);
     mValue = easing::interp<E, T>(begin, mTarget, t);
     if (time >= 1)
     {
-      aw() << false;
-      ew() << true;
+      aw() = false;
+      ew() = true;
     }
     return mValue;
   }
@@ -2586,7 +2610,7 @@ namespace vessl
       stage.reset();
     }
     final.reset();
-    eocw() << false;
+    eocw() = false;
     stageIdx = 0;
     stages[0].start(0);
   }
@@ -2598,7 +2622,7 @@ namespace vessl
     T value = currentStage().template generate<E>();
     if (stageIdx == stages.getSize() && final.eos())
     {
-      eocw() << true;
+      eocw() = true;
     }
     else if (shouldAdvance(stageIdx))
     {
@@ -2638,7 +2662,7 @@ namespace vessl
         envelope<T>::startStage(1, attack().value().template read<T>());
       }
     }
-    attack().target() << math::max(value, attackTarget);
+    attack().target() = math::max(value, attackTarget);
   }
 
   template<typename T>
@@ -2658,16 +2682,16 @@ namespace vessl
     {
       mValue = v;
     }
-    rw() << isRise;
-    fw() << isFall;
+    rw() = isRise;
+    fw() = isFall;
     return mValue;
   }
 
   template<class W>
   typename W::SampleType oscil<W>::generate()
   {
-    typename W::SampleType val = waveform.evaluate(phase + *pm());
-    phase += (*fHz() * math::exp2(*fmExp()) + *fmLin()) * dt();
+    typename W::SampleType val = waveform.evaluate(phase + pm());
+    phase += (fHz() * math::exp2(static_cast<analog_t>(fmExp())) + fmLin()) * dt();
     phase = math::wrap01(phase);
     return val;
   }
@@ -2715,7 +2739,7 @@ namespace vessl
     // delay time in samples
     analog_t dts = math::constrain<analog_t>(mDelayInSamples, 0.f, static_cast<analog_t>(buffer.getSize()-1));
     analog_t s = buffer.template read<I>(dts);
-    analog_t fbk = math::constrain<analog_t>(*feedback(), -1.0, 1.0);
+    analog_t fbk = math::constrain<analog_t>(static_cast<analog_t>(feedback()), -1.0, 1.0);
     buffer.write(in + s * fbk);
     return s;
   }
@@ -2741,7 +2765,7 @@ namespace vessl
         // delay time in samples
         analog_t dts = math::constrain<analog_t>(mDelayInSamples, 0.f, static_cast<analog_t>(buffer.getSize()-1));
         analog_t wet = buffer.template read<I>(dts);
-        analog_t fbk = math::constrain<analog_t>(*feedback(), -1.0, 1.0);
+        analog_t fbk = math::constrain<analog_t>(static_cast<analog_t>(feedback()), -1.0, 1.0);
         buffer.write(in + wet*fbk);
         w << wet;
       }
@@ -2759,7 +2783,7 @@ namespace vessl
       // delay time in samples
       analog_t fts = math::constrain<analog_t>(mDelayInSamples, 0.0, static_cast<analog_t>(buffer.getSize()-1));
       analog_t tts = math::constrain<analog_t>(targetSampleDelay, 0.0, static_cast<analog_t>(buffer.getSize()-1));
-      analog_t fbk = math::constrain<analog_t>(*feedback(), -1.0, 1.0);
+      analog_t fbk = math::constrain<analog_t>(static_cast<analog_t>(feedback()), -1.0, 1.0);
       
       while (r && w)
       {
@@ -2777,19 +2801,19 @@ namespace vessl
   template<typename T, uint32_t MaxBits>
   T bitcrush<T, MaxBits>::process(const T& in)
   {
-    rateAlpha += math::max(1.0f, *rate())*dt();
+    rateAlpha += math::max<analog_t>(1.0, static_cast<analog_t>(rate()))*dt();
     if (rateAlpha >= 1)
     {
       rateAlpha -= 1;
       currSample = easing::lerp(prevInput, in, rateAlpha);
     }
 
-    analog_t bd = math::constrain<analog_t>(*depth(), 2.0, MaxBits);
+    analog_t bd = math::constrain<analog_t>(static_cast<analog_t>(depth()), 2.0, MaxBits);
     analog_t scalar = math::pow<analog_t>(2.0, bd) - 1;
     T val = math::round(currSample*scalar);
-    if (mangle().template read<bool>())
+    if (mangle())
     {
-      val = val ^ math::round(prevInput*scalar);
+      val = math::xore(val, math::round(prevInput*scalar));
     }
     prevInput = in;
     return val * (1.0 / scalar);

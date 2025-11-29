@@ -194,19 +194,25 @@ namespace vessl
     void copyTo(array dest);
 
     void fill(T value);
-    // returns dest
+    
+    // adds value to every element in the array, returns dest
+    array offset(T value, array dest) const;
+    array offset(T value) { return offset(value, *this); }
+    
+    // element-wise addition of this and other, returns dest
     array add(array other, array dest) const;
-    // returns this
     array add(array other) { return add(other, *this); }
+    
+    // element-wise subtraction of this and other, returns dest
     array subtract(array other, array dest) const;
     array subtract(array other) { return subtract(other, *this); }
-    // returns dest
+    
+    // scales every element in this array by value, returns dest
     array scale(analog_t value, array dest) const;
-    // returns this
     array scale(analog_t value) { return scale(value, *this); }
-    // returns dest
+    
+    // element-wise multiplication of this and other, returns dest
     array multiply(array other, array dest) const;
-    // returns this
     array multiply(array other) { return multiply(other, *this); }
   };
 
@@ -404,28 +410,30 @@ namespace vessl
   };
   
   template<typename T>
-  struct procSource : source<T>
+  struct procSrc : source<T>
   {
-    typename array<T>::reader reader;
+    typename array<T>::reader r;
     processor<T>* proc;
-    source<T>* in;
-    procSource(processor<T>& proc, source<T>& src) : reader(), proc(&proc), in(&src) {}
-    procSource(processor<T>& proc, array<T> arr) : reader(arr), proc(&proc), in(&reader) {}
-    binary_t isEmpty() const override { return in->isEmpty(); }
-    T read() override { return proc->process(in->read()); }
+    source<T>* src;
+    procSrc(processor<T>& proc, source<T>& src) : r(), proc(&proc), src(&src) {}
+    procSrc(processor<T>& proc, array<T> arr) : r(arr), proc(&proc), src(&r) {}
+    binary_t isEmpty() const override { return src->isEmpty(); }
+    T read() override { return proc->process(src->read()); }
     T& operator>>(T& rhs) { rhs = read(); return rhs; }
-    sink<T>& operator>>(sink<T>& out) { proc->process(*in, out); return out; }
-    array<T> operator>>(array<T> out) { typename array<T>::writer w = out.getWriter(); proc->process(*in, w); return out; }
+    procSrc operator>>(processor<T>& proc) { return procSrc(proc, *this); }
+    sink<T>& operator>>(sink<T>& out) { proc->process(*src, out); return out; }
+    array<T> operator>>(array<T> out) { typename array<T>::writer w = out.getWriter(); proc->process(*src, w); return out; }
   };
   
   template<typename T>
-  procSource<T> operator>>(const T& in, processor<T>& proc) { return procSource<T>(proc, frame::channels<T,1>(in)); }
+  procSrc<T> operator>>(const T& in, processor<T>& proc) { return procSrc<T>(proc, frame::channels<T,1>(in)); }
 
   template<typename T>
-  procSource<T> operator>>(source<T>& in, processor<T>& proc) { return procSource<T>(proc, in); }
+  procSrc<T> operator>>(source<T>& in, processor<T>& proc) { return procSrc<T>(proc, in); }
 
   template<typename T>
-  procSource<T> operator>>(array<T> in, processor<T>& proc) { return procSource<T>(proc, in); }
+  procSrc<T> operator>>(array<T> in, processor<T>& proc) { return procSrc<T>(proc, in); }
+  
 
   template<typename T>
   class ring : array<T>
@@ -538,7 +546,7 @@ namespace vessl
   };
   
   template<typename T>
-  procSource<T> operator>>(const parameter& p, processor<T>& proc) { return procSource<T>(proc, frame::channels<T, 1>(p.read<T>())); }
+  procSrc<T> operator>>(const parameter& p, processor<T>& proc) { return procSrc<T>(proc, frame::channels<T, 1>(p.read<T>())); }
   
   template<typename T>
   bool operator>(const parameter& p, const T& v) { return p.read<T>() > v; }
@@ -970,7 +978,8 @@ namespace vessl
       T x1 = T(0), y1 = T(0);
       void process(const T* source, T* dest, size_t blockSize, const args& args)
       {
-        analog_t r = (args.sr - 1.0) / args.sr;
+        // gives us about 0.995 for 44100, which is a pretty good R according to the article above.
+        analog_t r = (args.sr - 200.0f) / args.sr;
         while (blockSize--)
         {
           T x = *source++;
@@ -1936,10 +1945,14 @@ namespace vessl
     using unit::dt;
 
   public:
+    filter(analog_t sampleRate) : unitProcessor<T>(init, sampleRate)
+    , fargs(sampleRate, 1, 1, gain::fromDecibels(0))
+    { cutoff() = fargs.hz, q() = fargs.q; }
+    
     filter(analog_t sampleRate, analog_t cutoffInHz, analog_t kyu = filtering::q::butterworth<T>(), gain emphasis = gain::fromDecibels(0) ) 
     : unitProcessor<T>(init, sampleRate)
     , fargs(sampleRate, cutoffInHz, kyu, emphasis)
-    { cutoff() = cutoffInHz; q() = kyu; }
+    { cutoff() = fargs.hz; q() = fargs.q; }
 
     parameter& cutoff() { return init.params[0]; }
     parameter& q() { return init.params[1]; }
@@ -2074,6 +2087,19 @@ namespace vessl
     {
       w << value;
     }
+  }
+
+  template<typename T>
+  array<T> array<T>::offset(T value, array dest) const
+  {
+    VASSERT(size <= dest.size, "arrays are have different lengths or destination is too small");
+    reader a(data, size);
+    writer b(dest.data, dest.size);
+    while (a)
+    {
+      b << a.read() + value;
+    }
+    return dest;
   }
 
   template<typename T>
@@ -2831,9 +2857,18 @@ namespace vessl
   template<>
   void array<float>::copyTo(array dest)
   {
-    VASSERT(this->getSize() <=- dest.getSize(), "Not enough room in destination for this array");
-    arm_copy_f32(this->getData(), dest.getData(), this->getSize());
+    VASSERT(this->getSize() <= dest.getSize(), "Not enough room in destination for this array");
+    arm_copy_f32(data, dest.getData(), this->getSize());
   }
+
+  // not present in 2021.10, which I'm currently compiling against.
+  // template<>
+  // array<float> array<float>::offset(float value, array dest) const
+  // {
+  //   VASSERT(this->getSize() <= dest.getSize(), "Not enough room in destination for this array");
+  //   arm_offset_f32(data, value, dest.getData(), this->getSize());
+  //   return dest;
+  // }
   
   template<>
   array<float> array<float>::add(array other, array dest) const

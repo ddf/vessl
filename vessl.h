@@ -2860,15 +2860,14 @@ namespace vessl
     VASSERT(this->getSize() <= dest.getSize(), "Not enough room in destination for this array");
     arm_copy_f32(data, dest.getData(), this->getSize());
   }
-
-  // not present in 2021.10, which I'm currently compiling against.
-  // template<>
-  // array<float> array<float>::offset(float value, array dest) const
-  // {
-  //   VASSERT(this->getSize() <= dest.getSize(), "Not enough room in destination for this array");
-  //   arm_offset_f32(data, value, dest.getData(), this->getSize());
-  //   return dest;
-  // }
+  
+  template<>
+  array<float> array<float>::offset(float value, array dest) const
+  {
+    VASSERT(this->getSize() <= dest.getSize(), "Not enough room in destination for this array");
+    arm_offset_f32(data, value, dest.getData(), this->getSize());
+    return dest;
+  }
   
   template<>
   array<float> array<float>::add(array other, array dest) const

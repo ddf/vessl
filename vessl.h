@@ -410,30 +410,38 @@ namespace vessl
   };
   
   template<typename T>
-  struct procSrc : source<T>
+  struct procBlock
   {
-    typename array<T>::reader r;
+    processor<T>* proc;
+    array<T> block;
+    procBlock(processor<T>& proc, array<T> arr) : proc(&proc), block(arr) {}
+    // implies in-place processing of block
+    procBlock operator>>(processor<T>& next) { proc->process(block, block); return procBlock(next, block); }
+    array<T> operator>>(array<T> out) { proc->process(block, out); return out; }
+  };
+
+  template<typename T>
+  procBlock<T> operator>>(array<T> in, processor<T>& proc) { return procBlock<T>(proc, in); }
+  
+  template<typename T>
+  struct procStream : source<T>
+  {
     processor<T>* proc;
     source<T>* src;
-    procSrc(processor<T>& proc, source<T>& src) : r(), proc(&proc), src(&src) {}
-    procSrc(processor<T>& proc, array<T> arr) : r(arr), proc(&proc), src(&r) {}
+    procStream(processor<T>& proc, source<T>& src) : proc(&proc), src(&src) {}
     binary_t isEmpty() const override { return src->isEmpty(); }
     T read() override { return proc->process(src->read()); }
     T& operator>>(T& rhs) { rhs = read(); return rhs; }
-    procSrc operator>>(processor<T>& proc) { return procSrc(proc, *this); }
+    procStream operator>>(processor<T>& proc) { return procStream(proc, *this); }
     sink<T>& operator>>(sink<T>& out) { proc->process(*src, out); return out; }
     array<T> operator>>(array<T> out) { typename array<T>::writer w = out.getWriter(); proc->process(*src, w); return out; }
   };
   
   template<typename T>
-  procSrc<T> operator>>(const T& in, processor<T>& proc) { return procSrc<T>(proc, frame::channels<T,1>(in)); }
+  procStream<T> operator>>(const T& in, processor<T>& proc) { return procStream<T>(proc, frame::channels<T,1>(in)); }
 
   template<typename T>
-  procSrc<T> operator>>(source<T>& in, processor<T>& proc) { return procSrc<T>(proc, in); }
-
-  template<typename T>
-  procSrc<T> operator>>(array<T> in, processor<T>& proc) { return procSrc<T>(proc, in); }
-  
+  procStream<T> operator>>(source<T>& in, processor<T>& proc) { return procStream<T>(proc, in); }
 
   template<typename T>
   class ring : array<T>
@@ -546,7 +554,7 @@ namespace vessl
   };
   
   template<typename T>
-  procSrc<T> operator>>(const parameter& p, processor<T>& proc) { return procSrc<T>(proc, frame::channels<T, 1>(p.read<T>())); }
+  procStream<T> operator>>(const parameter& p, processor<T>& proc) { return procStream<T>(proc, frame::channels<T, 1>(p.read<T>())); }
   
   template<typename T>
   bool operator>(const parameter& p, const T& v) { return p.read<T>() > v; }
@@ -1011,7 +1019,7 @@ namespace vessl
 
       data(analog_t* coeffData, size_t coeffSize, T* stateData, size_t stateSize)
       : coeff(coeffData, coeffSize), state(stateData, stateSize)
-      { coeff.fill(0); state.fill(0); }
+      { coeff.fill(0); state.fill(T(0)); }
       
       size_t getCoeffSize() const { return coeff.getSize(); }
       size_t getStateSize() const { return state.getSize(); }
@@ -1945,11 +1953,11 @@ namespace vessl
     using unit::dt;
 
   public:
-    filter(analog_t sampleRate) : unitProcessor<T>(init, sampleRate)
+    explicit filter(analog_t sampleRate) : unitProcessor<T>(init, sampleRate)
     , fargs(sampleRate, 1, 1, gain::fromDecibels(0))
     { fHz() = fargs.hz, q() = fargs.q; }
     
-    filter(analog_t sampleRate, analog_t cutoffInHz, analog_t kyu = filtering::q::butterworth<T>(), gain emphasis = gain::fromDecibels(0) ) 
+    filter(analog_t sampleRate, analog_t cutoffInHz, analog_t kyu = filtering::q::butterworth<analog_t>(), gain emphasis = gain::fromDecibels(0) ) 
     : unitProcessor<T>(init, sampleRate)
     , fargs(sampleRate, cutoffInHz, kyu, emphasis)
     { fHz() = fargs.hz; q() = fargs.q; }

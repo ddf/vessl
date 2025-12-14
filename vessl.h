@@ -514,6 +514,8 @@ namespace vessl
     ring operator<<(typename array<T>::reader r);
   };
 
+  // @todo consider making this a wrapper for a param<T> + description.
+  // units would then return these by value, rather than by reference.
   class parameter
   {
   public:
@@ -550,12 +552,29 @@ namespace vessl
       desc descs[N];
     };
     
+    // template<typename T>
+    // struct data
+    // {
+    //   T value;
+    //   
+    //   void set(const void* v) { value = *static_cast<const T*>(v); }
+    //   const void* get() const { return &value; }
+    //   void writeTo(parameter& p) const { p.write(value); }
+    // };
+    //
+    // desc*  pdesc;
+    // void*  pdata;
+    //
+    // template<typename T>
+    // parameter(desc& desc, data<T>& data) : pdesc(&desc), pdata(&data.value) {}
+    
     // special param that may be returned from unit::getParameter
     static const parameter& none;
     
     template<typename T>
     T read() const
     {
+      // return *static_cast<const T*>(pdata.value);
       return *static_cast<const T*>(getData());
     }
 
@@ -571,6 +590,15 @@ namespace vessl
     template<typename T>
     parameter& write(const T& value)
     {
+      // switch (pdesc->type)
+      // {
+      //   case valuetype::none: break;
+      //   case valuetype::binary: *static_cast<binary_t*>(pdata) = static_cast<const binary_t&>(value); break;
+      //   case valuetype::digital: *static_cast<digital_t*>(pdata) = static_cast<const digital_t&>(value); break;
+      //   case valuetype::analog: *static_cast<analog_t*>(pdata) = static_cast<const analog_t&>(value); break;
+      //   // attempt to case data to T, might work?
+      //   case valuetype::user: *static_cast<T*>(pdata) = value; break;
+      // }
       setData(static_cast<const void*>(&value));
       return *this;
     }
@@ -689,29 +717,17 @@ namespace vessl
       const parameter::desc*       params;
       size_t                       paramCount;
     };
-    
-  private:
-    analog_t sampleRate;
-    analog_t deltaTime;
-    
-  protected:
-    explicit unit(analog_t sampleRate = 1) { setSampleRate(sampleRate); }
 
-  public:
     virtual ~unit() = default;
-
-    analog_t getSampleRate() const { return sampleRate; }
-    void setSampleRate(analog_t sr);
     
-    // providing a description is option, but useful.
+    // common interface for setting sample rate, for those units that might need it.
+    virtual void setSampleRate(analog_t sr) {}
+    
+    // providing a description is optional, but useful.
     virtual description getDescription() const { return { "", nullptr, 0 }; }
     virtual const list<parameter>& getParameters() const = 0;
     
     // @todo get parameter by name / id
-
-  protected:
-    virtual void onSampleRateChanged() {}
-    analog_t dt() const { return deltaTime; }
   };
   
   inline const parameter::desc* begin(const unit::description& desc) { return desc.params; }
@@ -721,14 +737,14 @@ namespace vessl
   class unitGenerator : public unit, public generator<T>
   {
   protected:
-    explicit unitGenerator(analog_t sampleRate = 1) : unit(sampleRate), generator<T>() {}
+    explicit unitGenerator() : unit(), generator<T>() {}
   };
 
   template<typename T>
   class unitProcessor : public unit, public processor<T>
   {
   protected:
-    explicit unitProcessor(analog_t sampleRate = 1) : unit(sampleRate), processor<T>() {}
+    explicit unitProcessor() : unit(), processor<T>() {}
   };
 
   namespace interpolation
@@ -1337,17 +1353,14 @@ namespace vessl
   {
   public:
     explicit noiseGenerator(analog_t sampleRate = 1)
-    : unitGenerator<T>(sampleRate), noise(sampleRate), step(0)
+    : unitGenerator<T>(), noise(sampleRate), dt(1.0f/sampleRate), step(0)
     {
       value = noise();
       next = noise();
       params.rate.value = sampleRate;
     }
-    noiseGenerator(const noiseGenerator&) = default;
-    noiseGenerator(noiseGenerator&&) = default;
-    noiseGenerator& operator=(const noiseGenerator&) = default;
-    noiseGenerator& operator=(noiseGenerator&&) = default;
-    ~noiseGenerator() override = default;
+    
+    void setSampleRate(float sampleRate) override { dt = 1.0f / sampleRate;}
     
     using pdl = parameter::desclist<1>;
     unit::description getDescription() const override
@@ -1379,11 +1392,10 @@ namespace vessl
     
     P params;
     N noise;
+    analog_t dt;
     analog_t value;
     analog_t next;
     analog_t step;
-    
-    using unit::dt;
   };
 
   // unit that generates a linear ramp from one value to another over a duration of seconds
@@ -1393,13 +1405,15 @@ namespace vessl
   {
   public:
     explicit ramp(analog_t sampleRate, analog_t durationInSeconds = 0, T fromValue = T(0), T toValue = T(0))
-    : unitGenerator<T>(sampleRate), t(0)
+    : unitGenerator<T>(), dt(1.0f/sampleRate), t(0)
     {
       params.from.value = fromValue;
       params.to.value = toValue;
       params.duration.value = durationInSeconds;
       params.eor.value = false;
     }
+    
+    void setSampleRate(float sampleRate) override { dt = 1.0f / sampleRate;}
     
     using pdl = parameter::desclist<4>;
     unit::description getDescription() const override
@@ -1443,9 +1457,8 @@ namespace vessl
     }; 
     
     P params;
+    analog_t dt;
     analog_t t;
-
-    using unit::dt;
   };
 
   // generates an envelope that begins and ends at zero, with some number of stages leading up to a final stage.
@@ -1459,7 +1472,9 @@ namespace vessl
     class stage final : public unitGenerator<T>
     {
     public:
-      explicit stage(analog_t sampleRate) : unitGenerator<T>(sampleRate), begin(0) { reset(); }
+      explicit stage(analog_t sampleRate) : unitGenerator<T>(), begin(0), dt(1.0f/sampleRate) { reset(); }
+      
+      void setSampleRate(float sampleRate) override { dt = 1.0f / sampleRate;}
       
       using pdl = parameter::desclist<5>;
       unit::description getDescription() const override
@@ -1486,9 +1501,9 @@ namespace vessl
       // current value of the stage
       const parameter& value() const { return params.output; }
 
-      void start(T fromValue) { begin = fromValue; params.output.value = fromValue; time = -unit::dt(); params.active.value = true; params.eos.value = false; }
-      void reset() { params.active.value = false; params.eos.value = false; time = -unit::dt(); params.output.value = 0; }
-
+      void start(T fromValue) { begin = fromValue; params.output.value = fromValue; time = -dt; params.active.value = true; params.eos.value = false; }
+      void reset() { params.active.value = false; params.eos.value = false; time = -dt; params.output.value = 0; }
+      
       template<typename E>
       T generate() { return active() ? step<E>() : params.output.value; }
       T generate() override { return generate<easing::linear>(); }
@@ -1515,12 +1530,15 @@ namespace vessl
       T begin; // value the stage started with
       // where we are in the stage
       analog_t time;
+      analog_t dt;
     };
   protected:
-    envelope(stage* stages, size_t stageCount, analog_t sampleRate) : unitGenerator<T>(sampleRate)
+    envelope(stage* stages, size_t stageCount, analog_t sampleRate) : unitGenerator<T>()
     , stages(stages, stageCount), stageIdx(0), final(sampleRate) {}
     
   public:
+    void setSampleRate(float sampleRate) override;
+    
     stage& getStage(size_t idx) { return idx == stages.getSize() ? final : stages[idx]; }
     const stage& getStage(size_t idx) const { return idx == stages.getSize() ? final : stages[idx]; }
     size_t getStageCount() const { return stages.size() + 1; }
@@ -1543,7 +1561,6 @@ namespace vessl
     T generate() override { return generate<easing::linear>(); }
 
   protected:
-    void onSampleRateChanged() override;
     void startStage(size_t idx, T fromValue) { getStage(idx).start(fromValue); stageIdx = idx; }
     
     // by default, stages advance automatically when their eos goes high.
@@ -1660,10 +1677,12 @@ namespace vessl
     // note: choice of epsilon will depend on the amount of noise in the signal to be slewed.
     // the default value was chosen based on testing with an OWL module's audio input.
     slew(analog_t sampleRate, analog_t riseRate, analog_t fallRate, T initialValue = T(0), T epsilon = math::epsilon<T>()*1000)
-    : unitProcessor<T>(sampleRate), epsilon(epsilon)
+    : unitProcessor<T>(), epsilon(epsilon), dt(1.0f/sampleRate)
     {
       params.rise.value = riseRate; params.fall.value = fallRate; params.output.value = initialValue;
     }
+    
+    void setSampleRate(float sampleRate) override { dt = 1.0f / sampleRate; }
     
     using pdl = parameter::desclist<5>;
     unit::description getDescription() const override
@@ -1708,11 +1727,13 @@ namespace vessl
     
     P params;
     T epsilon;
-
-    using unit::dt;
-    using unit::getSampleRate;
+    analog_t dt;
   };
 
+  // @todo possibly downgrade this from a unit to a utility class.
+  // one of these takes 56 bytes to do what OWL's SmoothValue does with 8.
+  // All the extra overhead is from class v-tables,
+  // which I'm not sure is worth it for how I tend to use this (i.e. not in a signal chain).
   template<typename T = analog_t>
   class smoother : public unitProcessor<T>
   {
@@ -1771,12 +1792,14 @@ namespace vessl
   public:
     using T = typename W::SampleType;
     
-    oscil() : unitGenerator<T>(), phase(0) { params.fHz.value = 440.0; }
+    oscil() : unitGenerator<T>(), phase(0), dt(0) { params.fHz.value = 440.0; }
 
     template<typename... Ts>
     explicit oscil(analog_t sampleRate, analog_t freqInHz, Ts... wargs)
-    : unitGenerator<T>(sampleRate), waveform(wargs...), phase(0)
+    : unitGenerator<T>(), waveform(wargs...), phase(0), dt(1.0f/sampleRate)
     { params.fHz.value = freqInHz; }
+    
+    void setSampleRate(float sampleRate) override { dt = 1.0f / sampleRate;}
 
     W waveform;
     
@@ -1825,7 +1848,7 @@ namespace vessl
     
     P params;
     analog_t phase;
-    using unit::dt;
+    analog_t dt;
   };
 
   template<typename T>
@@ -1856,12 +1879,14 @@ namespace vessl
   {
   public:
     delay(array<T> buffer, analog_t sampleRate, analog_t delayInSeconds = 0, analog_t feedbackAmount = 0)
-    : unitProcessor<T>(sampleRate), buffer(buffer.getData(), buffer.getSize())
+    : unitProcessor<T>(), buffer(buffer.getData(), buffer.getSize()), dt(1.0f/sampleRate)
     {
       params.time.value = duration::fromSeconds(delayInSeconds, sampleRate);
       mDelayInSamples = params.time.value.samples;
       params.feedback.value = feedbackAmount;
     }
+    
+    void setSampleRate(float sampleRate) override { dt = 1.0f / sampleRate; }
     
     using pdl = parameter::desclist<2>;
     unit::description getDescription() const override
@@ -1906,9 +1931,7 @@ namespace vessl
   protected:
     delayline<T> buffer;
     analog_t mDelayInSamples;
-
-    using unit::dt;
-    using unit::getSampleRate;
+    analog_t dt;
   };
 
   template<typename T>
@@ -1916,12 +1939,14 @@ namespace vessl
   {
   public:
     follow(array<T> window, analog_t sampleRate, analog_t responseTimeInSeconds)
-    : unitProcessor<T>(sampleRate), writer(window), window(window)
+    : unitProcessor<T>(), writer(window), window(window)
     , delta(math::exp(-1.0 / (sampleRate*responseTimeInSeconds)))
     , previous(0), current(0)
     {
       params.response.value = responseTimeInSeconds;
     }
+    
+    void setSampleRate(float sampleRate) override { delta = math::exp(-1.0 / (sampleRate*params.response.value)); }
     
     using pdl = parameter::desclist<1>;
     unit::description getDescription() const override
@@ -1969,16 +1994,18 @@ namespace vessl
   class freeze : public unit, public processor<T>, public generator<T>
   {
   public:
-    freeze(array<T> buffer, analog_t sampleRate) : unit(sampleRate), buffer(buffer.getData(), buffer.getSize())
-    , mPhase(0), crossfade(0.75f), freezeDelay(0), freezeSize(0), readRate(1)
+    explicit freeze(array<T> buffer, float sampleRate) : unit(), buffer(buffer.getData(), buffer.getSize())
+    , mPhase(0), crossfade(0.75f), freezeDelay(0), freezeSize(0), readRate(1), dt(1.0/sampleRate)
     {
       params.size.value.samples = buffer.getSize()-1;
       freezeSize = params.size.value.samples;
       params.rate.value = 1.0;
     }
+    
+    void setSampleRate(analog_t sr) override { dt = 1.0/sr; }
 
     using pdl = parameter::desclist<4>;
-    unit::description getDescription() const override
+    description getDescription() const override
     {    
       static constexpr pdl $ = {
         {
@@ -2040,7 +2067,7 @@ namespace vessl
     delayline<T> buffer;
     analog_t mPhase;
     smoother<analog_t> crossfade; // used to crossfade between the incoming signal and the freeze signal when enabled changes.
-    analog_t freezeDelay, freezeSize, readRate;
+    analog_t freezeDelay, freezeSize, readRate, dt;
   };
 
   // unit for use with filter types defined in the filtering namespace.
@@ -2052,7 +2079,7 @@ namespace vessl
   public:
     typedef H<T> function;
     
-    explicit filter(analog_t sampleRate) : unitProcessor<T>(sampleRate)
+    explicit filter(analog_t sampleRate) : unitProcessor<T>(), sampleRate(sampleRate)
     {
       params.fHz.value = sampleRate;
       params.q.value = 1;
@@ -2060,12 +2087,14 @@ namespace vessl
     }
     
     filter(analog_t sampleRate, analog_t freqInHz, analog_t kyu = filtering::q::butterworth<analog_t>(), gain emphasis = gain::fromDecibels(0) ) 
-    : unitProcessor<T>(sampleRate)
+    : unitProcessor<T>(), sampleRate(sampleRate)
     {
       params.fHz.value = freqInHz;
       params.q.value = kyu;
       params.emphasis.value = emphasis;
     }
+    
+    void setSampleRate(analog_t sampleRate) override { this->sampleRate = sampleRate; }
     
     using pdl = parameter::desclist<3>;
     unit::description getDescription() const override
@@ -2091,7 +2120,7 @@ namespace vessl
     {
       T out;
       filtering::args fargs = {
-        unit::getSampleRate(),
+        sampleRate,
         params.fHz.value,
         math::max(params.q.value, 0.01),
         params.emphasis.value
@@ -2103,7 +2132,7 @@ namespace vessl
     void process(array<T> in, array<T> out) override
     {
       filtering::args fargs = {
-        unit::getSampleRate(),
+        sampleRate,
         params.fHz.value,
         math::max(params.q.value, 0.01),
         params.emphasis.value
@@ -2122,7 +2151,7 @@ namespace vessl
     
     P params;
     function func;
-    using unit::dt;
+    analog_t sampleRate;
   };
 
   // designed to work with floating point types.
@@ -2131,11 +2160,13 @@ namespace vessl
   {
   public:
     bitcrush(analog_t sampleRate, analog_t bitRate, analog_t bitDepth = MaxBits)
-      : unitProcessor<T>(sampleRate), prevInput(0), currSample(0), rateAlpha(0)
+      : unitProcessor<T>(), prevInput(0), currSample(0), rateAlpha(0), dt(1.0f/sampleRate)
     {
       params.bitRate.value = bitRate;
       params.bitDepth.value = bitDepth;
     }
+    
+    void setSampleRate(analog_t sampleRate) override { dt = 1.0f / sampleRate;}
     
     using pdl = parameter::desclist<3>;
     unit::description getDescription() const override
@@ -2174,8 +2205,7 @@ namespace vessl
     T prevInput;
     T currSample;
     analog_t rateAlpha;
-
-    using unit::dt;
+    analog_t dt;
   };
 
   // A simple peak limiter adapted from pinchenettes/stmlib via DaisySP
@@ -2183,7 +2213,7 @@ namespace vessl
   class limiter : public unitProcessor<T>
   {
   public:
-    explicit limiter(gain preGain = gain::fromDecibels(0)) : unitProcessor<T>(1)
+    explicit limiter(gain preGain = gain::fromDecibels(0)) : unitProcessor<T>()
     {
       params.preGain.value = preGain;
       params.peak.value = 0.5;
@@ -2369,13 +2399,6 @@ namespace vessl
       write(r.read());
     }
     return *this;
-  }
-  
-  inline void unit::setSampleRate(analog_t sr)
-  {
-    sampleRate = math::max(sr,static_cast<analog_t>(1.0));
-    deltaTime = 1.0f / sr;
-    onSampleRateChanged();
   }
 
   inline void clockable::clock()
@@ -2665,7 +2688,7 @@ namespace vessl
   template<typename T, typename N>
   T noiseGenerator<T, N>::generate()
   {
-    step += dt() * rate();
+    step += dt * rate();
     if (step >= 1)
     {
       value = next;
@@ -2705,7 +2728,7 @@ namespace vessl
     if (isActive())
     {
       analog_t dinv = 1.f / duration();
-      t += dt() * dinv;
+      t += dt * dinv;
       if (t >= 1)
       {
         params.eor.value = true;
@@ -2718,8 +2741,7 @@ namespace vessl
   template<typename E>
   T envelope<T>::stage::step()
   {
-    analog_t dt = unit::dt();
-    analog_t s = unit::dt() / math::max<analog_t>(static_cast<analog_t>(duration()), dt);
+    analog_t s = dt / math::max<analog_t>(static_cast<analog_t>(duration()), dt);
     time += s;
     analog_t t = math::constrain<analog_t>(time, 0.0, 1.0);
     params.output.value = easing::interp<E, T>(begin, params.target.value, t);
@@ -2761,13 +2783,13 @@ namespace vessl
   }
 
   template<typename T>
-  void envelope<T>::onSampleRateChanged()
+  void envelope<T>::setSampleRate(analog_t sampleRate)
   {
     for (stage& stage : stages)
     {
-      stage.setSampleRate(unit::getSampleRate());
+      stage.setSampleRate(sampleRate);
     }
-    final.setSampleRate(unit::getSampleRate());
+    final.setSampleRate(sampleRate);
   }
 
   template<typename T>
@@ -2801,11 +2823,11 @@ namespace vessl
     binary_t isFall = v < params.output.value-epsilon;
     if (isRise)
     {
-      params.output.value = math::min(v, params.output.value + params.rise.value*dt());
+      params.output.value = math::min(v, params.output.value + params.rise.value*dt);
     }
     else if (isFall)
     {
-      params.output.value = math::max(v, params.output.value - params.fall.value*dt());
+      params.output.value = math::max(v, params.output.value - params.fall.value*dt);
     }
     else
     {
@@ -2820,7 +2842,7 @@ namespace vessl
   typename W::SampleType oscil<W>::generate()
   {
     typename W::SampleType val = waveform.evaluate(phase + pm());
-    phase += (fHz() * math::exp2(static_cast<analog_t>(fmExp())) + fmLin()) * dt();
+    phase += (fHz() * math::exp2(static_cast<analog_t>(fmExp())) + fmLin()) * dt;
     phase = math::wrap01(phase);
     return val;
   }
@@ -2886,7 +2908,7 @@ namespace vessl
     {
       typename array<T>::reader r = input.getReader();
       typename array<T>::writer w = output.getWriter();
-      analog_t dst = dt() * 10.0f;
+      analog_t dst = dt * 10.0f;
       while (r && w)
       {
         T in = r.read();
@@ -3002,7 +3024,7 @@ namespace vessl
       analog_t fd = params.position.value;
       analog_t fs = params.size.value.samples;
       analog_t rt = params.rate.value;
-      analog_t st = dt();
+      analog_t st = dt;
       while (w)
       {
         freezeDelay = easing::lerp(freezeDelay, fd, st*20);
@@ -3071,7 +3093,7 @@ namespace vessl
   template<typename T, uint32_t MaxBits>
   T bitcrush<T, MaxBits>::process(const T& in)
   {
-    rateAlpha += math::max<analog_t>(1.0, static_cast<analog_t>(rate()))*dt();
+    rateAlpha += math::max<analog_t>(1.0, static_cast<analog_t>(rate()))*dt;
     if (rateAlpha >= 1)
     {
       rateAlpha -= 1;

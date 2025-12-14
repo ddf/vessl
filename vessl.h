@@ -166,7 +166,7 @@ namespace vessl
   typename list<T>::iterator end(list<T>& lst) { return list<T>::iterator::end(lst); }
 
   template<typename T>
-  class array : public list<T>
+  class array // not a list<T> to keep size to 16 bytes
   {
   protected:
     T* data;
@@ -178,16 +178,14 @@ namespace vessl
 
     T* getData() { return data; }
     const T* getData() const { return data; }
-    size_t getSize() const override { return size; }
-    
-  protected:
-    T& elementAt(size_t index) override { return data[index]; }
-    const T& elementAt(size_t index) const override { return data[index]; }
-    
-  public:
+    size_t getSize() const { return size; }
+
     // ranged-based for support
     T* begin() { return data; }
     T* end() { return data + size; }
+    
+    T& operator[](size_t index) { return data[index]; }
+    const T& operator[](size_t index) const { return data[index]; }
 
     class reader final : public source<T>
     {

@@ -458,7 +458,7 @@ namespace vessl
     T exp2(T v) { return ::exp2(v); }
 
     template<typename T>
-    T exp10(T v) { return ::exp10(v); }
+    T exp10(T v) { return ::pow(10, v); }
     
     template<typename T>
     T log(T v) { return ::log(v); }
@@ -723,9 +723,12 @@ namespace vessl
       T value = T(0);
       static constexpr auto type = valuetype::user;
     };
-    
-    const desc* pdesc;
-    void*       pdata;
+        
+    template<size_t N>
+    struct list
+    {
+      parameter params[N];
+    };
     
     template<typename T>
     parameter(const desc& inDesc, const data<T>& inData) : pdesc(&inDesc), pdata(&const_cast<data<T>&>(inData).value) {}
@@ -760,6 +763,13 @@ namespace vessl
       return *this;
     }
     
+    template<typename T>
+    parameter& operator=(const T& value)
+    {
+      write(value);
+      return *this;
+    }
+    
     parameter& operator=(const parameter& rhs)
     {
       switch (pdesc->type)
@@ -782,18 +792,9 @@ namespace vessl
       return *this;
     }
     
-    template<typename T>
-    parameter& operator=(const T& value)
-    {
-      write(value);
-      return *this;
-    }
-    
-    template<size_t N>
-    struct list
-    {
-      parameter params[N];
-    };
+  private:
+    const desc* pdesc;
+    void* pdata;
   };
   
   template<size_t N>
@@ -1027,6 +1028,12 @@ namespace vessl
 
     template<typename T>
     T lerp(T begin, T end, analog_t t) { return interp<linear, T>(begin, end, t); }
+    
+    template<typename T>
+    T smooth(T value, T target, analog_t degree = 0.9f) { return value*degree + (1.0 - degree)*target; }
+    
+    template<>
+    inline digital_t smooth(digital_t value, digital_t target, analog_t degree) { return (value*degree + target)/(degree+1);  }
   }
 
   // analog unipolar noise generators that generate values in the range [0,1]
@@ -1296,6 +1303,32 @@ namespace vessl
     analog_t getBpm() const { return tempo.toBpm(sr); }
     // length of one clock pulse in samples
     analog_t getPeriod() const { return tempo.samples;}
+  };
+  
+  template<typename T = analog_t>
+  struct smoother
+  {
+    T        value;
+    analog_t degree;
+    
+    explicit smoother(analog_t smoothingDegree = 0.9, T initialValue = T(0))
+      : value(initialValue), degree(smoothingDegree)
+    {
+    }
+    
+    explicit operator T() const { return value; }
+    
+    // so we can use this like OWL's SmoothValue
+    T operator=(const T& v)
+    {
+      analog_t d = math::constrain<analog_t>(degree, 0.0, 1.0);
+      return value = easing::smooth(value, v, d);
+    }
+    
+    T operator=(const parameter& p)
+    {
+      return *this = p.read<T>();
+    }
   };
   
   // a waveform that can be evaluated using a normalized phase value
@@ -1751,59 +1784,6 @@ namespace vessl
     P params;
     T epsilon;
     analog_t dt;
-  };
-
-  // @todo possibly downgrade this from a unit to a utility class.
-  // one of these takes 32 bytes to do what OWL's SmoothValue does with 8.
-  // All the extra overhead is from class v-tables,
-  // which I'm not sure is worth it for how I tend to use this (i.e. not in a signal chain).
-  template<typename T = analog_t>
-  class smoother : public unitProcessor<T>
-  {
-    static constexpr parameter::desc d_d = { "degree", 'd', analog_p::type };
-    static constexpr parameter::desc d_v = { "value", 'v', param<T>::type };
-    using pdl = parameter::desclist<2>;
-    static constexpr pdl p = {{ d_d, d_v }};
-    
-    struct P : plist<pdl::size> 
-    {
-      analog_p degree;
-      param<T> output;
-      
-      parameter::list<pdl::size> get() const override { return { degree(d_d), output(d_v) }; }
-    };
-    
-  public:
-    explicit smoother(analog_t smoothingDegree = 0.9, T initialValue = T(0)) : unitProcessor<T>()
-    {
-      params.degree.value = smoothingDegree;
-      params.output.value = initialValue;
-    }
-    
-    unit::description getDescription() const override
-    {
-      return { "smoother", p.descs, pdl::size };
-    }
-    
-    const list<parameter>& getParameters() const override { return params; }
-
-    parameter degree() { return params.degree(d_d); }
-    parameter value() const { return params.output(d_v); }
-
-    T process(const T& v) override
-    {
-      analog_t t = math::constrain<analog_t>(static_cast<analog_t>(params.degree.value), 0.0, 1.0);
-      return params.output.value = easing::lerp(v, params.output.value, t);
-    }
-    
-    // for block processing
-    using unitProcessor<T>::process;
-    
-    // so we can use this like OWL's SmoothValue
-    T operator<<(const T& v) { return process(v); }
-    
-  private:
-    P params;
   };
 
   // note: W must implement waveform<T>
@@ -3000,7 +2980,7 @@ namespace vessl
   T freeze<T, I>::process(const T& in) 
   {
     binary_t isEnabled = static_cast<binary_t>(enabled());
-    analog_t wetLevel = crossfade.process(isEnabled ? 1.0 : 0.0);
+    analog_t wetLevel = crossfade = (isEnabled ? 1.0 : 0.0);
     T wet = generate();
     if (!isEnabled)
     {
@@ -3052,7 +3032,7 @@ namespace vessl
         if (UseInput)
         {
           binary_t isEnabled = params.enabled.value;
-          analog_t wetLevel = crossfade.process(isEnabled ? 1.0 : 0.0);
+          analog_t wetLevel = crossfade = (isEnabled ? 1.0 : 0.0);
           T in = r.read();
           if (!isEnabled)
           {
@@ -3086,7 +3066,7 @@ namespace vessl
         if (UseInput)
         {
           binary_t isEnabled = params.enabled.value;
-          analog_t wetLevel = crossfade.process(isEnabled ? 1.0 : 0.0);
+          analog_t wetLevel = crossfade = (isEnabled ? 1.0 : 0.0);
           T in = r.read();
           if (!isEnabled)
           {

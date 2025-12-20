@@ -480,6 +480,9 @@ namespace vessl
 
     template<typename T>
     T round(T x) { return ::round(x); }
+    
+    template<typename T>
+    T floor(T x) { return ::floor(x); }
 
     template<typename T, size_t N>
     frame::channels<T, N> round(frame::channels<T, N> x)

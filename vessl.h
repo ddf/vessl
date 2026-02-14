@@ -56,6 +56,10 @@
 #undef sin
 #endif
 
+#ifdef exp10
+#undef exp10
+#endif
+
 // mainly to get Rider to shut up about not being able to find assert even though we include <cassert>
 #ifndef NDEBUG
 #ifndef assert
@@ -65,14 +69,11 @@ static void assert(bool condition) { }
 
 #define VASSERT(cond, msg) assert((void(msg), cond))
 
-// again because Rider doesn't think memcpy is available even though we include <cstring>
-extern void* memcpy( void* dest, const void* src, std::size_t count );
-
 // Note: In all classes using typename T, it is assumed to be POD and to have support for all arithmetic operators
 namespace vessl
 {
   using char_t = char;
-  using size_t = std::size_t;
+  using size_t = uint64_t;
   using binary_t = bool;
   using digital_t = int64_t;
   using analog_t = float;
@@ -523,6 +524,9 @@ namespace vessl
     // @todo use modf here
     template<typename T>
     T wrap01(T val) { return wrap(val, T(0), T(1)); }
+    
+    template<>
+    inline float wrap01(float v) { float i; float f = modf(v, &i); return f < 0 ? 1.0f - f : f; }
 
     template<typename T>
     binary_t isNan(T n) { return isnan(n); }
@@ -531,7 +535,7 @@ namespace vessl
     template<typename T>
     T xore(const T& a, const T& b)
     {
-      return a xor b;
+      return a ^ b;
     }
     
     template<>
@@ -3123,9 +3127,6 @@ namespace vessl
     //return pre*gain*0.8;
   }
 
-  template<>
-  inline float math::wrap01(float v) { float i; float f = modf(v, &i); return f < 0 ? 1.0f - f : f; }
-
 #ifdef ARM_CORTEX
   template<>
   void array<float>::fill(float value)
@@ -3180,42 +3181,48 @@ namespace vessl
     return dest;
   }
   
-  template<>
-  inline float math::sin(float x) { return arm_sin_f32(x); }
-
-  template<>
-  inline float math::sqrt(float x)
+  namespace math
   {
-    float out;
-    if (ARM_MATH_SUCCESS == arm_sqrt_f32(x, &out))
+    template<>
+    inline float sin(float x) { return arm_sin_f32(x); }
+
+    template<>
+    inline float sqrt(float x)
     {
-      return out;
+      float out;
+      if (ARM_MATH_SUCCESS == arm_sqrt_f32(x, &out))
+      {
+        return out;
+      }
+      return 0;
     }
-    return 0;
   }
   
-  template<size_t STAGES>
-  template<class CoGen>
-  struct filtering::biquad<STAGES>::df2T<float, CoGen> final : cascade<float, 2>
+  namespace filtering
   {
-    arm_biquad_cascade_df2T_instance_f32 inst;
-          
-    using cascade<float, 2>::coeff;
-    using cascade<float, 2>::state;
-    using cascade<float, 2>::getCoeffSize;
-    using cascade<float, 2>::getStateSize;
-    
-    static CoGen cg;
-  
-    df2T() { arm_biquad_cascade_df2T_init_f32(&inst, STAGES, coeff.getData(), state.getData()); }
-    
-    size_t getStageCount() const { return STAGES; }
-  
-    void process(const float* source, float* dest, size_t blockSize, const args& args)
+    template<size_t STAGES>
+    template<class CoGen>
+    struct biquad<STAGES>::df2T<float, CoGen> final : cascade<float, 2>
     {
-      cg(coeff.getData(), args.omega(), args.q, args.g);
-      arm_biquad_cascade_df2T_f32(&inst, source, dest, blockSize);
-    }
-  };
+      arm_biquad_cascade_df2T_instance_f32 inst;
+          
+      using biquad<STAGES>::cascade<float, 2>::coeff;
+      using biquad<STAGES>::cascade<float, 2>::state;
+      using biquad<STAGES>::cascade<float, 2>::getCoeffSize;
+      using biquad<STAGES>::cascade<float, 2>::getStateSize;
+    
+      static CoGen cg;
+  
+      df2T() { arm_biquad_cascade_df2T_init_f32(&inst, STAGES, coeff.getData(), state.getData()); }
+    
+      size_t getStageCount() const { return STAGES; }
+  
+      void process(const float* source, float* dest, size_t blockSize, const args& args)
+      {
+        cg(coeff.getData(), args.omega(), args.q, args.g);
+        arm_biquad_cascade_df2T_f32(&inst, source, dest, blockSize);
+      }
+    };
+  }
 #endif
 }

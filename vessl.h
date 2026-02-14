@@ -675,9 +675,7 @@ namespace vessl
 
     ring operator<<(typename array<T>::reader r);
   };
-
-  // @todo consider making this a wrapper for a param<T> + description.
-  // units would then return these by value, rather than by reference.
+  
   class parameter
   {
   public:
@@ -738,7 +736,9 @@ namespace vessl
     };
     
     template<typename T>
-    parameter(const desc& inDesc, const data<T>& inData) : pdesc(&inDesc), pdata(&const_cast<data<T>&>(inData).value) {}
+    parameter(const desc& inDesc, const data<T>& inData) : description(inDesc), pdata(&const_cast<data<T>&>(inData).value) {}
+    
+    const desc& getDescription() const { return description; }
     
     template<typename T>
     T read() const
@@ -758,7 +758,7 @@ namespace vessl
     template<typename T>
     parameter& write(const T& value)
     {
-      switch (pdesc->type)
+      switch (description.type)
       {
         case valuetype::none: break;
         case valuetype::binary: *static_cast<binary_t*>(pdata)   = static_cast<binary_t>(value); break;
@@ -779,28 +779,31 @@ namespace vessl
     
     parameter& operator=(const parameter& rhs)
     {
-      switch (pdesc->type)
+      if (&rhs != this)
       {
+        switch (description.type)
+        {
         case valuetype::none: break;
         case valuetype::binary: *static_cast<binary_t*>(pdata)   = rhs.readBinary(); break;
         case valuetype::digital: *static_cast<digital_t*>(pdata) = rhs.readDigital(); break;
         case valuetype::analog: *static_cast<analog_t*>(pdata)   = rhs.readAnalog(); break;
         case valuetype::user: 
-          switch (rhs.pdesc->type)
+          switch (rhs.description.type)
           {
-          case valuetype::none: break;
-          case valuetype::binary: write(rhs.readBinary()); break;
-          case valuetype::digital: write(rhs.readDigital()); break;
-          case valuetype::analog: write(rhs.readAnalog()); break;
-          case valuetype::user: VASSERT(false, "Can't assign user parameter to user parameter with operater="); break;
+        case valuetype::none: break;
+        case valuetype::binary: write(rhs.readBinary()); break;
+        case valuetype::digital: write(rhs.readDigital()); break;
+        case valuetype::analog: write(rhs.readAnalog()); break;
+        case valuetype::user: VASSERT(false, "Can't assign user parameter to user parameter with operater="); break;
           }
           break;
+        }
       }
       return *this;
     }
     
   private:
-    const desc* pdesc;
+    desc  description;
     void* pdata;
   };
   
@@ -1736,16 +1739,8 @@ namespace vessl
   };
   
   template<typename T>
-  class slew : public unitProcessor<T>
+  class slew : public unitProcessor<T>, protected list<parameter>
   {
-    static constexpr parameter::desc d_a = { "rise", 'a', analog_p::type };
-    static constexpr parameter::desc d_d = { "fall", 'd', analog_p::type };
-    static constexpr parameter::desc d_r = { "rising", 'r', binary_p::type };
-    static constexpr parameter::desc d_f = { "falling", 'f', binary_p::type };
-    static constexpr parameter::desc d_v = { "value", 'v', param<T>::type };
-    using pdl = parameter::desclist<5>;
-    static constexpr pdl p = {{ d_a, d_d, d_r, d_f, d_v }};
-  
   public:
     // note: choice of epsilon will depend on the amount of noise in the signal to be slewed.
     // the default value was chosen based on testing with an OWL module's audio input.
@@ -1757,38 +1752,41 @@ namespace vessl
     
     void setSampleRate(float sampleRate) override { dt = 1.0f / sampleRate; }
     
+    using pdl = parameter::desclist<5>;
     unit::description getDescription() const override
     {
+      pdl p = {{ rise().getDescription(), fall().getDescription(), rising().getDescription(), falling().getDescription(), value().getDescription() }};
       return { "slew", p.descs, pdl::size };
     }
     
-    const list<parameter>& getParameters() const override { return params; }
+    const list<parameter>& getParameters() const override { return *this; }
 
-    parameter rise() { return params.rise(d_a); }
-    parameter fall() { return params.fall(d_d); }
-    parameter rising() const { return params.rising(d_r); }
-    parameter falling() const { return params.falling(d_f); }
-    parameter value() const { return params.output(d_v); }
+    parameter rise() const { return params.rise({ "rise", 'a', analog_p::type }); }
+    parameter fall() const { return params.fall({ "fall", 'd', analog_p::type }); }
+    parameter rising() const { return params.rising({ "rising", 'r', binary_p::type }); }
+    parameter falling() const { return params.falling({ "falling", 'f', binary_p::type }); }
+    parameter value() const { return params.output({ "value", 'v', param<T>::type }); }
     
     T process(const T& v) override;
     using processor<T>::process;
     
+  protected:
+    size_t getSize() const override { return pdl::size; }
+    parameter elementAt(size_t index) const override
+    {
+      parameter plist[] = { rise(), fall(), rising(), falling(), value() };
+      return plist[index];
+    }
+    
   private:
-    struct P : plist<pdl::size>
+    struct
     {
       analog_p rise;
       analog_p fall;
       binary_p rising;
       binary_p falling;
       param<T> output;
-      
-      parameter::list<pdl::size> get() const override
-      {
-        return { rise(d_a), fall(d_d), rising(d_r), falling(d_f), output(d_v) };
-      }
-    };
-    
-    P params;
+    } params;
     T epsilon;
     analog_t dt;
   };

@@ -139,14 +139,16 @@ namespace vessl
     
     class iterator
     {
-      list* src = nullptr;
+      const list* src = nullptr;
       size_t index = 0;
+      iterator(const list& src, size_t idx): src(&src), index(idx) {}
     public:
-      static iterator begin(list& src) { return { &src, 0 }; }
-      static iterator end(list& src) { return { &src, src->getSize() }; }
+      static iterator begin(const list& src) { return iterator(src, 0); }
+      static iterator end(const list& src) { return iterator(src, src.getSize()); }
       T operator*() const { return (*src)[index]; }
       iterator& operator++() { index++; return *this; } 
       bool operator==(const iterator& it) const { return src == it.src && index == it.index; }
+      bool operator!=(const iterator& it) const { return !(*this == it); }
     };
     
   protected:
@@ -154,10 +156,10 @@ namespace vessl
   };
   
   template<typename T>
-  typename list<T>::iterator begin(list<T>& lst) { return list<T>::iterator::begin(lst); }
+  typename list<T>::iterator begin(const list<T>& lst) { return list<T>::iterator::begin(lst); }
   
   template<typename T>
-  typename list<T>::iterator end(list<T>& lst) { return list<T>::iterator::end(lst); }
+  typename list<T>::iterator end(const list<T>& lst) { return list<T>::iterator::end(lst); }
 
   template<typename T>
   class array // not a list<T> to keep size to 16 bytes
@@ -459,7 +461,7 @@ namespace vessl
     T exp2(T v) { return ::exp2(v); }
 
     template<typename T>
-    T exp10(T v) { return ::pow(10, v); }
+    T exp10(T v) { return ::pow(T(10), v); }
     
     template<typename T>
     T log(T v) { return ::log(v); }
@@ -700,7 +702,7 @@ namespace vessl
       id_t          id;
       valuetype     type;
       
-      static const desc empty;
+      static desc empty() { return {"", 0, valuetype::none}; }
     };
     
     template<size_t N>
@@ -718,7 +720,7 @@ namespace vessl
             return descs[i];
           }
         }
-        return desc::empty;
+        return desc::empty();
       }
     };
     
@@ -727,12 +729,6 @@ namespace vessl
     {
       T value = T(0);
       static constexpr auto type = valuetype::user;
-    };
-        
-    template<size_t N>
-    struct list
-    {
-      parameter params[N];
     };
     
     template<typename T>
@@ -802,17 +798,33 @@ namespace vessl
       return *this;
     }
     
+    static parameter none();
+    
   private:
     desc  description;
     void* pdata;
   };
   
-  template<size_t N>
-  struct plist : list<parameter>
+  struct parameters : list<parameter>
   {
+    // @todo access by ID
+  };
+
+  inline parameters::iterator begin(const parameters& lst) { return parameters::iterator::begin(lst); }
+  inline parameters::iterator end(const parameters& lst)   { return parameters::iterator::end(lst); }
+  
+  template<size_t N>
+  struct plist : parameters
+  {
+    static constexpr size_t plsz = N;
     size_t getSize() const override { return N; }
-    parameter elementAt(size_t index) const override { return get().params[index]; }
-    virtual parameter::list<N> get() const = 0;
+  };
+  
+  template<>
+  struct parameter::data<void*>
+  {
+    void* value = nullptr;
+    static constexpr auto type = valuetype::none;
   };
   
   template<>
@@ -863,6 +875,8 @@ namespace vessl
   typedef param<binary_t>  binary_p;
   typedef param<gain>      gain_p;
   typedef param<duration>  duration_p;
+
+  inline parameter parameter::none() { data<void*> v; return parameter(desc::empty(), v); }
   
   template<typename T>
   procSample<T> operator>>(const parameter& p, processor<T>& proc) { return procSample<T>(proc, p.read<T>()); }
@@ -920,7 +934,7 @@ namespace vessl
     
     // providing a description is optional, but useful.
     virtual description getDescription() const { return { "", nullptr, 0 }; }
-    virtual const list<parameter>& getParameters() const = 0;
+    virtual const parameters& getParameters() const = 0;
     
     // @todo get parameter by name / id
   };
@@ -1321,7 +1335,7 @@ namespace vessl
     T        value;
     analog_t degree;
     
-    explicit smoother(analog_t smoothingDegree = 0.9, T initialValue = T(0))
+    explicit smoother(analog_t smoothingDegree = 0.9f, T initialValue = T(0))
       : value(initialValue), degree(smoothingDegree)
     {
     }
@@ -1412,23 +1426,8 @@ namespace vessl
   
   // generates stepped analog noise at rate values per second.
   template<typename T, typename N>
-  class noiseGenerator final : public unitGenerator<T>
+  class noiseGenerator final : public unitGenerator<T>, protected plist<1>
   {
-    static constexpr parameter::desc d_r = { "rate", 'r', analog_p::type };
-    
-    using pdl = parameter::desclist<1>;
-    static constexpr pdl p = {{ d_r }};
-    
-    struct P : plist<pdl::size>
-    {
-      analog_p rate;
-      
-      parameter::list<pdl::size> get() const override
-      {
-        return { rate(d_r) };
-      }
-    };
-    
   public:
     explicit noiseGenerator(analog_t sampleRate = 1)
     : unitGenerator<T>(), noise(sampleRate), dt(1.0f/sampleRate), step(0)
@@ -1439,14 +1438,9 @@ namespace vessl
     }
     
     void setSampleRate(float sampleRate) override { dt = 1.0f / sampleRate;}
-    
-    unit::description getDescription() const override
-    {
-      return { "noise generator", p.descs, pdl::size };
-    }
-    const list<parameter>& getParameters() const override { return params; }
+    const parameters& getParameters() const override { return *this; }
 
-    parameter rate() { return params.rate(d_r); }
+    parameter rate() const { return params.rate({ "rate", 'r', analog_p::type }); }
 
     // generates stepped noise in the range [0,1] at the given rate
     T generate() override;
@@ -1454,9 +1448,15 @@ namespace vessl
     // smooths the stepped noise with the given easing
     template<typename E>
     T generate();
-    
-  private:    
-    P params;
+
+  protected:
+    parameter elementAt(size_t index) const override { parameter p[plsz] = { rate() }; return p[index]; }
+
+  private:
+    struct
+    {
+      analog_p rate;
+    } params;
     N noise;
     analog_t dt;
     analog_t value;
@@ -1467,29 +1467,8 @@ namespace vessl
   // unit that generates a linear ramp from one value to another over a duration of seconds
   // @todo implement easings above and add that as a template parameter
   template<typename T>
-  class ramp final : public unitGenerator<T>
+  class ramp final : public unitGenerator<T>, protected plist<4>
   {
-    static constexpr parameter::desc d_f = { "from", 'f', param<T>::type };
-    static constexpr parameter::desc d_t = { "to", 't', param<T>::type };
-    static constexpr parameter::desc d_d = { "duration", 'd', analog_p::type };
-    static constexpr parameter::desc d_e = { "eor",      'e', binary_p::type };
-    
-    using pdl = parameter::desclist<4>;
-    static constexpr pdl p = {{ d_f, d_t, d_d, d_e }};
-    
-    struct P : plist<pdl::size> 
-    {
-      param<T> from, to;
-      analog_p duration;
-      binary_p eor;
-      
-    protected:
-      parameter::list<pdl::size> get() const override
-      {
-        return { from(d_f), to(d_t), duration(d_d), eor(d_e) };
-      }
-    };
-    
   public:
     explicit ramp(analog_t sampleRate, analog_t durationInSeconds = 0, T fromValue = T(0), T toValue = T(0))
     : unitGenerator<T>(), dt(1.0f/sampleRate), t(0)
@@ -1501,29 +1480,31 @@ namespace vessl
     }
     
     void setSampleRate(float sampleRate) override { dt = 1.0f / sampleRate;}
-    
-    unit::description getDescription() const override
-    {
-      return { "ramp", p.descs, pdl::size };
-    }
-    
-    const list<parameter>& getParameters() const override { return params; }
+    const parameters& getParameters() const override { return *this; }
 
     // ins
-    parameter from() { return params.from(d_f); }
-    parameter to() { return params.to(d_t); }
-    parameter duration() { return params.duration(d_d); }
+    parameter from() const { return params.from({ "from", 'f', param<T>::type }); }
+    parameter to() const { return params.to({ "to", 't', param<T>::type }); }
+    parameter duration() const { return params.duration({ "duration", 'd', analog_p::type }); }
 
     // outs
-    parameter eor() const { return params.eor(d_e); }
+    parameter eor() const { return params.eor({ "eor", 'e', binary_p::type }); }
     // could also add t as an out.
 
     binary_t isActive() const { return !params.eor.value; }
     void trigger();
     T generate() override;
     
+  protected:
+    parameter elementAt(size_t index) const override { parameter p[plsz] = { from(), to(), duration(), eor() }; return p[index]; }
+    
   private:
-    P params;
+    struct
+    {
+      param<T> from, to;
+      analog_p duration;
+      binary_p eor;
+    } params;
     analog_t dt;
     analog_t t;
   };
@@ -1533,55 +1514,23 @@ namespace vessl
   // and whether the envelope should hold the stage value until it is triggered again.
   // @todo figure out how the heck to return a full description and parameter lists for envelopes.
   template<typename T>
-  class envelope : public unitGenerator<T>
+  class envelope : public unitGenerator<T>, protected plist<2>
   {
-    static constexpr parameter::desc d_e = { "eoc", 'e', binary_p::type };
-    using pdl = parameter::desclist<1>;
-    static constexpr pdl p = {{ d_e }};
-    
   public:
-    class stage final : public unitGenerator<T>
+    class stage final : public unitGenerator<T>, protected plist<5>
     {
-      static constexpr parameter::desc d_t = { "target",   't', analog_p::type };
-      static constexpr parameter::desc d_d = { "duration", 'd', analog_p::type };
-      static constexpr parameter::desc d_a = { "active",   'a', binary_p::type };
-      static constexpr parameter::desc d_e = { "eos",      'e', binary_p::type };
-      static constexpr parameter::desc d_v = { "value",    'v', analog_p::type };
-      using pdl = parameter::desclist<5>;        
-      static constexpr pdl p = {{ d_t, d_d, d_a, d_e, d_v }};
-      
-      struct P : plist<pdl::size>
-      {
-        param<T> target;
-        analog_p duration;
-        binary_p active;
-        binary_p eos;
-        param<T> output;
-        
-        parameter::list<pdl::size> get() const override
-        {
-          return { target(d_t), duration(d_d), active(d_a), eos(d_e), output(d_v) };
-        }
-      };
-      
     public:
       explicit stage(analog_t sampleRate) : unitGenerator<T>(), begin(0), dt(1.0f/sampleRate) { reset(); }
       
       void setSampleRate(float sampleRate) override { dt = 1.0f / sampleRate;}
-      
-      unit::description getDescription() const override
-      {
-        return { "envelope stage", p.descs, pdl::size };
-      }
-      
-      const list<parameter>& getParameters() const override { return params; }
+      const parameters& getParameters() const override { return *this; }
 
-      parameter target() { return params.target(d_t); }
-      parameter duration() { return params.duration(d_d); }
-      parameter active() const { return params.active(d_a); }
-      parameter eos() const { return params.eos(d_e); }
+      parameter target() const { return params.target({ "target", 't', analog_p::type }); }
+      parameter duration() const { return params.duration({ "duration", 'd', analog_p::type }); }
+      parameter active() const { return params.active({ "active", 'a', binary_p::type }); }
+      parameter eos() const { return params.eos({ "eos", 'e', binary_p::type }); }
       // current value of the stage
-      parameter value() const { return params.output(d_v); }
+      parameter value() const { return params.output({ "value", 'v', analog_p::type }); }
 
       void start(T fromValue) { begin = fromValue; params.output.value = fromValue; time = -dt; params.active.value = true; params.eos.value = false; }
       void reset() { params.active.value = false; params.eos.value = false; time = -dt; params.output.value = 0; }
@@ -1590,11 +1539,25 @@ namespace vessl
       T generate() { return active() ? step<E>() : params.output.value; }
       T generate() override { return generate<easing::linear>(); }
       
+    protected:
+      parameter elementAt(size_t index) const override
+      {
+        parameter p[plsz] = { target(), duration(), active(), eos(), value() };
+        return p[index];
+      }
+      
     private:
       template<typename E>
       T step();
       
-      P params;
+      struct
+      {
+        param<T> target;
+        analog_p duration;
+        binary_p active;
+        binary_p eos;
+        param<T> output;
+      } params;
       T begin; // value the stage started with
       // where we are in the stage
       analog_t time;
@@ -1616,10 +1579,10 @@ namespace vessl
     stage& finalStage() { return final; }
     const stage& finalStage() const { return final; }
     
-    const list<parameter>& getParameters() const override { return params; }
+    const parameters& getParameters() const override { return *this; }
 
     parameter value() const { return currentStage().value(); }
-    parameter eoc() const { return params.eoc(d_e); }
+    parameter eoc() const { return params.eoc({ "eoc", 'e', binary_p::type }); }
 
     // make this a parameter we check in generate?
     virtual void trigger();
@@ -1629,6 +1592,7 @@ namespace vessl
     T generate() override { return generate<easing::linear>(); }
 
   protected:
+    parameter elementAt(size_t index) const override { parameter p[plsz] = { value(), eoc() }; return p[index]; }
     void startStage(size_t idx, T fromValue) { getStage(idx).start(fromValue); stageIdx = idx; }
     
     // by default, stages advance automatically when their eos goes high.
@@ -1638,14 +1602,10 @@ namespace vessl
     virtual binary_t shouldAdvance(size_t currentStageIdx) { return getStage(currentStageIdx).eos().template read<bool>(); }
   
   private:
-    struct P : plist<pdl::size>
+    struct
     {
       binary_p eoc;
-      
-      parameter::list<pdl::size> get() const override { return { eoc(d_e) }; }
-    };
-    
-    P params;
+    } params;
     array<stage> stages;
     size_t stageIdx;
     stage final;
@@ -1666,6 +1626,7 @@ namespace vessl
 
     using envelope<T>::trigger;
     using envelope<T>::generate;
+    using envelope<T>::elementAt;
   };
 
   template<typename T>
@@ -1739,7 +1700,7 @@ namespace vessl
   };
   
   template<typename T>
-  class slew : public unitProcessor<T>, protected list<parameter>
+  class slew : public unitProcessor<T>, protected plist<5>
   {
   public:
     // note: choice of epsilon will depend on the amount of noise in the signal to be slewed.
@@ -1751,15 +1712,7 @@ namespace vessl
     }
     
     void setSampleRate(float sampleRate) override { dt = 1.0f / sampleRate; }
-    
-    using pdl = parameter::desclist<5>;
-    unit::description getDescription() const override
-    {
-      pdl p = {{ rise().getDescription(), fall().getDescription(), rising().getDescription(), falling().getDescription(), value().getDescription() }};
-      return { "slew", p.descs, pdl::size };
-    }
-    
-    const list<parameter>& getParameters() const override { return *this; }
+    const parameters& getParameters() const override { return *this; }
 
     parameter rise() const { return params.rise({ "rise", 'a', analog_p::type }); }
     parameter fall() const { return params.fall({ "fall", 'd', analog_p::type }); }
@@ -1771,10 +1724,9 @@ namespace vessl
     using processor<T>::process;
     
   protected:
-    size_t getSize() const override { return pdl::size; }
     parameter elementAt(size_t index) const override
     {
-      parameter plist[] = { rise(), fall(), rising(), falling(), value() };
+      parameter plist[plsz] = { rise(), fall(), rising(), falling(), value() };
       return plist[index];
     }
     
@@ -1793,28 +1745,8 @@ namespace vessl
 
   // note: W must implement waveform<T>
   template<class W>
-  class oscil final : public unitGenerator<typename W::SampleType>
+  class oscil final : public unitGenerator<typename W::SampleType>, protected plist<4>
   {
-    static constexpr parameter::desc d_f = { "frequency", 'f', analog_p::type };
-    static constexpr parameter::desc d_l = { "fm (lin)", 'l', analog_p::type };
-    static constexpr parameter::desc d_v = { "fm (v/oct)", 'v', analog_p::type };
-    static constexpr parameter::desc d_p = { "phase mod", 'p', analog_p::type };
-    using pdl = parameter::desclist<4>;
-    static constexpr pdl p = {{ d_f, d_l, d_v, d_p }};
-    
-    struct P : plist<pdl::size> 
-    {
-      analog_p fHz;
-      analog_p fmLin;
-      analog_p fmExp;
-      analog_p pm;
-      
-      parameter::list<pdl::size> get() const override
-      {
-        return { fHz(d_f), fmLin(d_l), fmExp(d_v), pm(d_p) };
-      }
-    };
-    
   public:
     using T = typename W::SampleType;
     
@@ -1829,28 +1761,36 @@ namespace vessl
 
     W waveform;
     
-    unit::description getDescription() const override
-    {
-      return { "oscil", p.descs, pdl::size };
-    }
-    
-    const list<parameter>& getParameters() const override { return params; }
+    const parameters& getParameters() const override { return *this; }
     
     // frequency in Hz without FM applied
-    parameter fHz() { return params.fHz(d_f); }
+    parameter fHz() const { return params.fHz({ "frequency", 'f', analog_p::type }); }
     // linear frequency modulation
-    parameter fmLin() { return params.fmLin(d_l); }
+    parameter fmLin() const { return params.fmLin({ "fm (lin)", 'l', analog_p::type }); }
     // v/oct (exponential) frequency modulation
-    parameter fmExp() { return params.fmExp(d_v); }
+    parameter fmExp() const { return params.fmExp({ "fm (v/oct)", 'v', analog_p::type }); }
     // phase modulation
-    parameter pm() { return params.pm(d_p); }
+    parameter pm() const { return params.pm({ "phase mod", 'p', analog_p::type }); }
 
     T generate() override;
 
     void reset() { phase = 0; }
     
+  protected:
+    parameter elementAt(size_t index) const override
+    {
+      parameter p[plsz] { fHz(), fmLin(), fmExp(), pm() };
+      return p[index];
+    }
+    
   private:
-    P params;
+    struct
+    {
+      analog_p fHz;
+      analog_p fmLin;
+      analog_p fmExp;
+      analog_p pm;
+    } params;
     analog_t phase;
     analog_t dt;
   };
@@ -1879,24 +1819,8 @@ namespace vessl
   };
   
   template<typename T, typename I = interpolation::linear<T>>
-  class delay : public unitProcessor<T>
+  class delay : public unitProcessor<T>, protected plist<2>
   {
-  public:
-    static constexpr parameter::desc d_t = { "time", 't', param<duration>::type };
-    static constexpr parameter::desc d_f = { "feedback", 'f', analog_p::type };
-    
-  private:
-    using pdl = parameter::desclist<2>;
-    static constexpr pdl p = {{ d_t, d_f }};
-    
-    struct P : plist<pdl::size> 
-    {
-      param<duration> time;
-      analog_p feedback;
-     
-      parameter::list<pdl::size> get() const override { return { time(d_t), feedback(d_f) }; }
-    };
-    
   public:
     delay(array<T> buffer, analog_t sampleRate, analog_t delayInSeconds = 0, analog_t feedbackAmount = 0)
     : unitProcessor<T>(), buffer(buffer.getData(), buffer.getSize()), dt(1.0f/sampleRate)
@@ -1907,22 +1831,15 @@ namespace vessl
     }
     
     void setSampleRate(float sampleRate) override { dt = 1.0f / sampleRate; }
-    
+    const parameters& getParameters() const override { return *this; }
 
-    unit::description getDescription() const override
-    {
-      return { "delay", p.descs, pdl::size };
-    }
-    
-    const list<parameter>& getParameters() const override { return params; }
-
-    delayline<T>& getbuffer() { return buffer; }
+    delayline<T>& getBuffer() { return buffer; }
     const delayline<T>& getBuffer() const { return buffer; }
 
     /// delay time expressed as vessl::duration (i.e. samples), can be set using an analog_t
-    parameter time() { return params.time(d_t); }
+    parameter time() const { return params.time({ "time", 't', param<duration>::type }); }
     /// amount of signal to feedback, can be negative to invert feedback signal, clamped [-1,1]
-    parameter feedback() { return params.feedback(d_f); }
+    parameter feedback() const { return params.feedback({ "feedback", 'f', analog_p::type }); }
     
     T process(const T& in) override;
 
@@ -1930,9 +1847,20 @@ namespace vessl
     
     template<duration::mode TimeMode = duration::mode::slew>
     void process(array<T> input, array<T> output);
+    
+  protected:
+    parameter elementAt(size_t index) const override
+    {
+      parameter p[plsz] = { time(), feedback() }; 
+      return p[index];
+    }
 
   private:
-    P params;
+    struct
+    {
+      param<duration> time;
+      analog_p feedback;
+    } params;
     
   protected:
     delayline<T> buffer;
@@ -1941,19 +1869,8 @@ namespace vessl
   };
 
   template<typename T>
-  class follow : public unitProcessor<T>
+  class follow : public unitProcessor<T>, protected plist<1>
   {
-    static constexpr parameter::desc d_r = { "response time", 'r', analog_p::type };
-    using pdl = parameter::desclist<1>;
-    static constexpr pdl p = {{ d_r }};
-    
-    // @todo actually expose this parameter
-    struct P : plist<pdl::size> 
-    {
-      analog_p response;
-      parameter::list<1> get() const override { return { response(d_r) }; }
-    };
-    
   public:
     follow(array<T> window, analog_t sampleRate, analog_t responseTimeInSeconds)
     : unitProcessor<T>(), writer(window), window(window)
@@ -1964,20 +1881,26 @@ namespace vessl
     }
     
     void setSampleRate(float sampleRate) override { delta = math::exp(-1.0 / (sampleRate*params.response.value)); }
+    const parameters& getParameters() const override { return *this; }
     
-    unit::description getDescription() const override
-    {
-      return { "envelope follower", p.descs, pdl::size };
-    }
-    
-    const list<parameter>& getParameters() const override { return params; }
+    parameter response() const { return params.response({ "response time", 'r', analog_p::type }); }
 
     T process(const T& in) override;
 
     using processor<T>::process;
     
+  protected:
+    parameter elementAt(size_t index) const override
+    {
+      parameter p[plsz] = { response() }; return p[index];
+    }
+    
   private:
-    P params;
+    struct
+    {
+      // @todo actually use this parameter
+      analog_p response;
+    } params;
     typename
     array<T>::writer writer;
     array<T> window;
@@ -1995,32 +1918,8 @@ namespace vessl
   // contents of the delayline, enabling it to be used to "freeze"
   // audio that has been recorded elsewhere (e.g. by a delay).
   template<typename T, typename I = interpolation::linear<T>>
-  class freeze : public unit, public processor<T>, public generator<T>
+  class freeze : public unit, public processor<T>, public generator<T>, protected plist<4>
   {
-  public:
-    static constexpr parameter::desc d_e = { "enabled", 'e', binary_p::type };
-    // end of the freeze loop in samples relative to the most recently recorded sample
-    static constexpr parameter::desc d_p = { "position", 'p', analog_p::type };
-    // size of the freeze loop as a duration (samples).
-    // the beginning of the freeze loop, when played forward, will be position + size.
-    static constexpr parameter::desc d_s = { "size", 's', analog_p::type };
-    // rate of playback when enabled, can be negative to play in reverse
-    static constexpr parameter::desc d_r = { "rate", 'r', analog_p::type };
-    
-  private:
-    using pdl = parameter::desclist<4>;
-    static constexpr pdl p = {{ d_e, d_p, d_s, d_s }};
-    
-    struct P : plist<pdl::size> 
-    {
-      binary_p enabled;
-      analog_p position;
-      param<duration> size;
-      analog_p rate;
-      
-      parameter::list<pdl::size> get() const override { return { enabled(d_e), position(d_p), size(d_s), rate(d_r) }; }
-    };
-    
   public:
     explicit freeze(array<T> buffer, float sampleRate) : unit(), buffer(buffer.getData(), buffer.getSize())
     , mPhase(0), crossfade(0.75f), freezeDelay(0), freezeSize(0), readRate(1), dt(1.0/sampleRate)
@@ -2030,22 +1929,20 @@ namespace vessl
       params.rate.value = 1.0;
     }
     
-    void setSampleRate(analog_t sr) override { dt = 1.0/sr; }
-    
-    description getDescription() const override
-    {    
-      return { "freeze", p.descs, pdl::size };
-    }
-    
-    const list<parameter>& getParameters() const override { return params; }
+    void setSampleRate(analog_t sr) override { dt = 1.0f/sr; }
+    const parameters& getParameters() const override { return *this; }
     
     delayline<T>& getBuffer() { return buffer; }
     const delayline<T>& getBuffer() const { return buffer; }
     
-    parameter enabled() { return params.enabled(d_e); }
-    parameter position() { return params.position(d_p); }
-    parameter size() { return params.size(d_s); }
-    parameter rate() { return params.rate(d_r); }
+    parameter enabled() const { return params.enabled({ "enabled", 'e', binary_p::type }); }
+    // end of the freeze loop in samples relative to the most recently recorded sample
+    parameter position() const { return params.position({ "position", 'p', analog_p::type }); }
+    // size of the freeze loop as a duration (samples).
+    // the beginning of the freeze loop, when played forward, will be position + size.
+    parameter size() const { return params.size({ "size", 's', analog_p::type }); }
+    // rate of playback when enabled, can be negative to play in reverse
+    parameter rate() const { return params.rate({ "rate", 'r', analog_p::type }); }
     // should this be a parameter? there's not much gained by it.
     analog_t phase() const { return mPhase; }
     // reset the phase to zero (argument for making it a parameter?)
@@ -2062,13 +1959,26 @@ namespace vessl
 
     template<duration::mode TimeMode = duration::mode::slew>
     void process(array<T> input, array<T> output) { procgen<TimeMode, true>(input, output); }
+    
+  protected:
+    parameter elementAt(size_t index) const override
+    {
+      parameter p[plsz] = { enabled(), position(), size(), rate() };
+      return p[index];
+    }
 
   private:
     // shared routine used by templated processing and generation methods
     template<duration::mode TimeMode, bool UseInput>
     void procgen(array<T> input, array<T> output);
     
-    P params;
+    struct
+    {
+      binary_p enabled;
+      analog_p position;
+      param<duration> size;
+      analog_p rate;
+    } params;
     delayline<T> buffer;
     analog_t mPhase;
     smoother<analog_t> crossfade; // used to crossfade between the incoming signal and the freeze signal when enabled changes.
@@ -2079,22 +1989,8 @@ namespace vessl
   // For example, for a 2 stage biquad low pass filter use:
   // filter<float, filtering::biquad<2>::lowPass>
   template<typename T, template<typename> typename H>
-  class filter : public unitProcessor<T>
+  class filter : public unitProcessor<T>, protected plist<3>
   {
-    static constexpr parameter::desc d_f = { "fHz", 'f', analog_p::type };
-    static constexpr parameter::desc d_q = { "q", 'q', analog_p::type };
-    static constexpr parameter::desc d_e = { "emphasis", 'e', analog_p::type };
-    using pdl = parameter::desclist<3>;
-    static constexpr pdl p = {{ d_f, d_q, d_e }};
-    
-    struct P : plist<pdl::size> 
-    {
-      analog_p fHz;
-      analog_p q;
-      param<gain> emphasis;
-      parameter::list<3> get() const override { return { fHz(d_f), q(d_q), emphasis(d_e) }; }
-    };
-    
   public:
     typedef H<T> function;
     
@@ -2114,18 +2010,12 @@ namespace vessl
     }
     
     void setSampleRate(analog_t sampleRate) override { this->sampleRate = sampleRate; }
-    
-    unit::description getDescription() const override
-    {
-      return { "filter", p.descs, pdl::size };
-    }
-    
-    const list<parameter>& getParameters() const override { return params; }
+    const parameters& getParameters() const override { return *this; }
 
-    parameter fHz() { return params.fHz(d_f); }
-    parameter q() { return params.q(d_q); }
+    parameter fHz() const { return params.fHz({ "fHz", 'f', analog_p::type }); }
+    parameter q() const { return params.q({ "q", 'q', analog_p::type }); }
     // unused by some filter types (see filtering section)
-    parameter emphasis() { return params.emphasis(d_e); }
+    parameter emphasis() const { return params.emphasis({ "emphasis", 'e', analog_p::type }); }
     
     T process(const T& in) override
     {
@@ -2151,31 +2041,24 @@ namespace vessl
       func.process(in.getData(), out.getData(), in.getSize(), fargs);
     }
     
+  protected:
+    parameter elementAt(size_t index) const override { parameter p[plsz] = {fHz(), q(), emphasis()}; return p[index]; }
+    
   private:
-    P params;
+    struct
+    {
+      analog_p fHz;
+      analog_p q;
+      param<gain> emphasis;
+    } params;
     function func;
     analog_t sampleRate;
   };
 
   // designed to work with floating point types.
   template<typename T, uint32_t MaxBits>
-  class bitcrush : public unitProcessor<T>
+  class bitcrush : public unitProcessor<T>, protected plist<3>
   {
-    static constexpr parameter::desc d_r = { "bit rate", 'r', analog_p::type };
-    static constexpr parameter::desc d_d = { "bit depth", 'd', analog_p::type };
-    static constexpr parameter::desc d_m = { "mangle", 'm', binary_p::type };
-    using pdl = parameter::desclist<3>;
-    static constexpr pdl p = {{ d_r, d_d, d_m }};
-    
-    struct P : plist<pdl::size>
-    {
-      analog_p bitRate;
-      analog_p bitDepth;
-      binary_p mangle;
-      
-      parameter::list<pdl::size> get() const override { return { bitRate(d_r), bitDepth(d_d), mangle(d_m) }; }
-    };
-    
   public:
     bitcrush(analog_t sampleRate, analog_t bitRate, analog_t bitDepth = MaxBits)
       : unitProcessor<T>(), prevInput(0), currSample(0), rateAlpha(0), dt(1.0f/sampleRate)
@@ -2185,24 +2068,30 @@ namespace vessl
     }
     
     void setSampleRate(analog_t sampleRate) override { dt = 1.0f / sampleRate;}
+    const parameters& getParameters() const override { return *this; }
 
-    unit::description getDescription() const override
-    {
-      return { "bit crush", p.descs, pdl::size };
-    }
-    
-    const list<parameter>& getParameters() const override { return params; }
-
-    parameter rate() { return params.bitRate(d_r); }
-    parameter depth() { return params.bitDepth(d_d); }
-    parameter mangle() { return params.mangle(d_m); }
+    parameter rate() const { return params.bitRate({ "bit rate", 'r', analog_p::type }); }
+    parameter depth() const { return params.bitDepth({ "bit depth", 'd', analog_p::type }); }
+    parameter mangle() const { return params.mangle({ "mangle", 'm', binary_p::type }); }
 
     T process(const T& in) override;
 
     using unitProcessor<T>::process;
     
+  protected:
+    parameter elementAt(size_t index) const override
+    {
+      parameter p[plsz] = { rate(), depth(), mangle() };
+      return p[index];
+    }
+    
   private:
-    P params;
+    struct
+    {
+      analog_p bitRate;
+      analog_p bitDepth;
+      binary_p mangle;
+    } params;
     T prevInput;
     T currSample;
     analog_t rateAlpha;
@@ -2211,44 +2100,36 @@ namespace vessl
 
   // A simple peak limiter adapted from pinchenettes/stmlib via DaisySP
   template<typename T>
-  class limiter : public unitProcessor<T>
+  class limiter : public unitProcessor<T>, protected plist<2>
   {
   public:
-    static constexpr parameter::desc d_g = { "pre-gain", 'g', param<gain>::type };
-    static constexpr parameter::desc d_k = { "peak", 'k', param<T>::type };
-
     explicit limiter(gain preGain = gain::fromDecibels(0)) : unitProcessor<T>()
     {
       params.preGain.value = preGain;
       params.peak.value = 0.5;
     }
-
-    unit::description getDescription() const override
-    {
-      return { "limiter", p.descs, pdl::size };
-    }
     
-    const list<parameter>& getParameters() const override { return params; }
+    const parameters& getParameters() const override { return *this; }
 
-    parameter preGain() { return params.preGain(d_g); }
-    const parameter& peak() const { return params.peak(d_k); }
+    parameter preGain() const { return params.preGain({ "pre-gain", 'g', param<gain>::type }); }
+    parameter peak() const { return params.peak({ "peak", 'k', param<T>::type }); }
 
     T process(const T& in) override;
     using unitProcessor<T>::process;
     
-  private:
-    using pdl = parameter::desclist<2>;
-    static constexpr pdl p = {{ d_g, d_k }};
+  protected:
+    parameter elementAt(size_t index) const override
+    {
+      parameter p[plsz] = { preGain(), peak() };
+      return p[index];
+    }
     
-    struct P : plist<pdl::size>
+  private:
+    struct
     {
       param<gain> preGain;
       param<T> peak;
-      
-      parameter::list<pdl::size> get() const override { return { preGain(d_g), peak(d_k) }; }
-    };
-    
-    P params;
+    } params;
   };
   
   /////////////////////////////////////////////////////////////////////////////////////////////////////

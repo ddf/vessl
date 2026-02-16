@@ -247,8 +247,8 @@ namespace vessl
     array subtract(array other) { return subtract(other, *this); }
     
     // scales every element in this array by value, returns dest
-    array scale(analog_t value, array dest) const;
-    array scale(analog_t value) { return scale(value, *this); }
+    array scale(T value, array dest) const;
+    array scale(T value) { return scale(value, *this); }
     
     // element-wise multiplication of this and other, returns dest
     array multiply(array other, array dest) const;
@@ -260,6 +260,64 @@ namespace vessl
 
   template<typename T>
   T* end(array<T>& arr) { return arr.end(); }
+  
+  template<typename T>
+  struct matrixData
+  {
+    T*       pData;
+    uint32_t numRows;
+    uint32_t numCols;
+    
+    matrixData() : pData(nullptr), numRows(0), numCols(0) {}
+    matrixData(T* d, uint32_t r, uint32_t c) : pData(d), numRows(r), numCols(c) {}
+    
+    T* operator*() { return pData; }
+    T* operator*() const { return pData; }
+    [[nodiscard]] uint32_t rows() const { return numRows; }
+    [[nodiscard]] uint32_t cols() const { return numCols; }
+  };
+  
+  template<typename T>
+  class matrix
+  {
+    matrixData<T> data;
+    
+  public:
+    matrix() = default;
+    matrix(T* data, size_t rows, size_t cols) : data(data, rows, cols) {}
+
+    T* getData() { return *data; }
+    const T* getData() const { return *data; }
+    [[nodiscard]] size_t getRows() const { return data.rows(); }
+    [[nodiscard]] size_t getColumns() const { return data.cols(); }
+    [[nodiscard]] size_t getSize() const { return getRows()*getColumns(); }
+    
+    T* operator[](uint32_t row) { return &getData()[row*getColumns()]; }
+    const T* operator[](uint32_t row) const { return &getData()[row*getColumns()]; }
+    
+    void clear() { array<T> arr(getData(), getSize()); arr.fill(T(0)); }
+    T get(size_t row, size_t col) const { return getData()[row*getColumns() + col]; }
+    void set(size_t row, size_t col, T value) { getData()[row*getColumns() + col] = value; }
+    
+    // element-wise addition of this and other, returns dest
+    matrix add(matrix other, matrix dest) const;
+    matrix add(matrix other) { return add(other, *this); }
+    
+    // element-wise subtraction of this and other, returns dest
+    matrix subtract(matrix other, matrix dest) const;
+    matrix subtract(matrix other) { return subtract(other, *this); }
+    
+    // scales every element in this matrix by value, returns dest
+    matrix scale(T value, matrix dest) const;
+    matrix scale(T value) { return scale(value, *this); }
+    
+    // matrix multiplication of this and other, returns dest
+    matrix multiply(matrix other, matrix dest) const;
+    matrix multiply(matrix other) { return multiply(other, *this); }
+    
+    // matrix vector multiplication of this and vector, returns dest
+    array<T> multiply(array<T> vector, array<T> dest) const;
+  };
   
   namespace frame
   {
@@ -2225,7 +2283,7 @@ namespace vessl
   }
 
   template<typename T>
-  array<T> array<T>::scale(analog_t value, array dest) const
+  array<T> array<T>::scale(T value, array dest) const
   {
     VASSERT(size <= dest.size, "destination size is too small");
     reader a(data, size);
@@ -2247,6 +2305,77 @@ namespace vessl
     while (a)
     {
       c << a.read() * b.read();
+    }
+    return dest;
+  }
+  
+  template<typename T>
+  matrix<T> matrix<T>::add(matrix other, matrix dest) const
+  {
+    VASSERT(rows == other.rows && rows == dest.rows && columns == other.columns && colums == dest.columns, "matrices do not have the same dimentions");
+    array lhs(getData(), getSize());
+    array rhs(other.getData(), other.getSize());
+    array dst(dest.getData(), dest.getSize());
+    lhs.add(rhs, dst);
+    return dest;
+  }
+
+  template<typename T>
+  matrix<T> matrix<T>::subtract(matrix other, matrix dest) const
+  {
+    VASSERT(rows == other.rows && rows == dest.rows && columns == other.columns && colums == dest.columns, "matrices do not have the same dimentions");
+    array lhs(getData(), getSize());
+    array rhs(other.getData(), other.getSize());
+    array dst(dest.getData(), dest.getSize());
+    lhs.subtract(rhs, dst);
+    return dest;
+  }
+  
+  template<typename T>
+  matrix<T> matrix<T>::scale(T value, matrix dest) const
+  {
+    array lhs(getData(), getSize());
+    array dst(dest.getData(), dest.getSize());
+    lhs.scale(value, dst);
+    return dest;
+  }
+  
+  template<typename T>
+  matrix<T> matrix<T>::multiply(matrix other, matrix dest) const
+  {
+    VASSERT(getColumns() == other.getRows(), "Incompatible matrix sizes in operands");
+    VASSERT(dest.getRows() == getRows(), "Incorrect number of rows in destination");
+    VASSERT(dest.getColumns() == other.getColumns(), "Incorrect number of columns in destination");
+    
+    for(size_t i = 0; i < getRows(); i++)
+    {
+      for(size_t j = 0; j < other.getColumns(); j++)
+      {
+        T accum = 0;
+        for(size_t k = 0; k < other.getRows(); k++)
+        {
+          accum += get(i, k) * other.get(k, j);
+        }
+        dest.set(i, j, accum);
+      }
+    }
+    return dest;
+  }
+  
+  template<typename T>
+  array<T> matrix<T>::multiply(array<T> vector, array<T> dest) const
+  {
+    VASSERT(getColumns() == vector.getSize(), "Incompatible operands");
+    VASSERT(dest.getSize() == getRows(), "Incompatible destination size");
+    
+    for(size_t i = 0; i < getRows(); i++)
+    {
+      T accum = 0;
+      for(size_t j = 0; j < vector.getSize(); j++)
+      {
+        accum += get(i, j) * vector[j];
+      }
+      dest[i] = accum;
     }
     return dest;
   }
@@ -3008,20 +3137,20 @@ namespace vessl
 
 #ifdef ARM_CORTEX
   template<>
-  void array<float>::fill(float value)
-  {
-    arm_fill_f32(value, data, size);  
-  }
-
-  template<>
-  void array<float>::copyTo(array dest)
+  inline void array<float32_t>::copyTo(array dest)
   {
     VASSERT(this->getSize() <= dest.getSize(), "Not enough room in destination for this array");
     arm_copy_f32(data, dest.getData(), this->getSize());
   }
+
+  template<>
+  inline void array<float32_t>::fill(float value)
+  {
+    arm_fill_f32(value, data, size);  
+  }
   
   template<>
-  array<float> array<float>::offset(float value, array dest) const
+  inline array<float32_t> array<float32_t>::offset(float value, array dest) const
   {
     VASSERT(this->getSize() <= dest.getSize(), "Not enough room in destination for this array");
     arm_offset_f32(data, value, dest.getData(), this->getSize());
@@ -3029,7 +3158,7 @@ namespace vessl
   }
   
   template<>
-  array<float> array<float>::add(array other, array dest) const
+  inline array<float32_t> array<float32_t>::add(array other, array dest) const
   {
     VASSERT(size == other.size && size <= dest.size, "Arrays are different sizes or dest is not large enough.");
     arm_add_f32(data, other.data, dest.data, size);
@@ -3037,7 +3166,7 @@ namespace vessl
   }
 
   template<>
-  array<float> array<float>::subtract(array other, array dest) const
+  inline array<float32_t> array<float32_t>::subtract(array other, array dest) const
   {
     VASSERT(size == other.size && size <= dest.size, "Arrays are different sizes or dest is not large enough.");
     arm_sub_f32(data, other.data, dest.data, size);
@@ -3045,7 +3174,7 @@ namespace vessl
   }
 
   template<>
-  array<float> array<float>::scale(float value, array dest) const
+  inline array<float32_t> array<float32_t>::scale(float32_t value, array dest) const
   {
     VASSERT(size <= dest.size, "Destination array is not large enough");
     arm_scale_f32(data, value, dest.data, size);
@@ -3053,12 +3182,67 @@ namespace vessl
   }
 
   template<>
-  array<float> array<float>::multiply(array other, array dest) const
+  inline array<float32_t> array<float32_t>::multiply(array other, array dest) const
   {
     VASSERT(size == other.size && size <= dest.size, "Arrays are different sizes or dest is not large enough.");
     arm_mult_f32(data, other.data, dest.data, size);
     return dest;
   }
+  
+  template<>
+  struct matrixData<float32_t>
+  {
+    arm_matrix_instance_f32 inst;
+    matrixData() { arm_mat_init_f32(&inst, 0, 0, nullptr); };
+    matrixData(float32_t* data, uint32_t r, uint32_t c) { arm_mat_init_f32(&inst, r, c, data); }
+    
+    float32_t* operator*() { return inst.pData; }
+    float32_t* operator*() const { return inst.pData; }
+    [[nodiscard]] uint32_t rows() const { return inst.numRows; }
+    [[nodiscard]] uint32_t cols() const { return inst.numCols; }
+  };
+  
+  template<>
+  inline matrix<float32_t> matrix<float32_t>::add(matrix other, matrix dest) const
+  {
+    VASSERT(rows == other.rows && rows == dest.rows && columns == other.columns && colums == dest.columns, "matrices do not have the same dimentions");
+    arm_mat_add_f32(&data.inst, &other.data.inst, &dest.data.inst);
+    return dest;
+  }
+
+  template<>
+  inline matrix<float32_t> matrix<float32_t>::subtract(matrix other, matrix dest) const
+  {
+    VASSERT(rows == other.rows && rows == dest.rows && columns == other.columns && colums == dest.columns, "matrices do not have the same dimentions");
+    arm_mat_sub_f32(&data.inst, &other.data.inst, &dest.data.inst);
+    return dest;
+  }
+  
+  template<>
+  inline matrix<float32_t> matrix<float32_t>::scale(float32_t value, matrix dest) const
+  {
+    arm_mat_scale_f32(&data.inst, value, &dest.data.inst);
+    return dest;
+  }
+  
+  template<>
+  inline matrix<float32_t> matrix<float32_t>::multiply(matrix other, matrix dest) const
+  {
+    VASSERT(getColumns() == other.getRows(), "Incompatible matrix sizes in operands");
+    VASSERT(dest.getRows() == getRows(), "Incorrect number of rows in destination");
+    VASSERT(dest.getColumns() == other.getColumns(), "Incorrect number of columns in destination");
+    arm_mat_mult_f32(&data.inst, &other.data.inst, &dest.data.inst);
+    return dest;
+  }
+  
+  // @todo can implement when/if I update the version of CMSIS used by OWL
+  // template<>
+  // inline array<float32_t> matrix<float32_t>::multiply(array<float32_t> vector, array<float32_t> dest) const
+  // {
+  //   VASSERT(getColumns() == vector.getSize(), "Incompatible operands");
+  //   VASSERT(dest.getSize() == getRows(), "Incompatible destination size");
+  //   return dest;
+  // }
   
   namespace math
   {

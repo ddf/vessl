@@ -534,7 +534,7 @@ namespace vessl
     T min(const T& a, const T& b) { return a < b ? a : b; }
 
     template<typename T>
-    T mod(T v, T* i) { return ::modf(v, i); }
+    T mod(T v, T* i) { return std::modf(v, i); }
 
     template<typename T>
     T pow(T x, T y) { return ::pow(x, y); }
@@ -586,7 +586,7 @@ namespace vessl
     T wrap01(T val) { return wrap(val, T(0), T(1)); }
     
     template<>
-    inline float wrap01(float v) { float i; float f = modf(v, &i); return f < 0 ? 1.0f - f : f; }
+    inline float wrap01(float v) { float i; float f = std::modff(v, &i); return f < 0 ? 1.0f - f : f; }
 
     template<typename T>
     binary_t isNan(T n) { return isnan(n); }
@@ -2312,7 +2312,7 @@ namespace vessl
   template<typename T>
   matrix<T> matrix<T>::add(matrix other, matrix dest) const
   {
-    VASSERT(rows == other.rows && rows == dest.rows && columns == other.columns && colums == dest.columns, "matrices do not have the same dimentions");
+    VASSERT(getRows() == other.getRows() && getRows() == dest.getRows() && getColumns() == other.getColumns() && getColumns() == dest.getColumns(), "matrices do not have the same dimentions");
     array lhs(getData(), getSize());
     array rhs(other.getData(), other.getSize());
     array dst(dest.getData(), dest.getSize());
@@ -2323,7 +2323,7 @@ namespace vessl
   template<typename T>
   matrix<T> matrix<T>::subtract(matrix other, matrix dest) const
   {
-    VASSERT(rows == other.rows && rows == dest.rows && columns == other.columns && colums == dest.columns, "matrices do not have the same dimentions");
+    VASSERT(getRows() == other.getRows() && getRows() == dest.getRows() && getColumns() == other.getColumns() && getColumns() == dest.getColumns(), "matrices do not have the same dimentions");
     array lhs(getData(), getSize());
     array rhs(other.getData(), other.getSize());
     array dst(dest.getData(), dest.getSize());

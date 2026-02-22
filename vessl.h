@@ -586,7 +586,7 @@ namespace vessl
     T wrap01(T val) { return wrap(val, T(0), T(1)); }
     
     template<>
-    inline float wrap01(float v) { float i; float f = std::modff(v, &i); return f < 0 ? 1.0f - f : f; }
+    inline float wrap01(float v) { float i; float f = mod(v, &i); return f < 0 ? 1.0f - f : f; }
 
     template<typename T>
     binary_t isNan(T n) { return isnan(n); }

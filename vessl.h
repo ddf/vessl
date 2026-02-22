@@ -24,7 +24,6 @@
 
 // ReSharper disable CppClangTidyPortabilityTemplateVirtualMemberFunction
 #pragma once
-#include <array>
 #include <cassert>
 #include <cmath>
 #include <cstdint>
@@ -141,7 +140,7 @@ namespace vessl
     {
       const list* src = nullptr;
       size_t index = 0;
-      iterator(const list& src, size_t idx): src(&src), index(idx) {}
+      iterator(const list& source, size_t idx): src(&source), index(idx) {}
     public:
       static iterator begin(const list& src) { return iterator(src, 0); }
       static iterator end(const list& src) { return iterator(src, src.getSize()); }
@@ -170,7 +169,7 @@ namespace vessl
 
   public:
     array() : data(nullptr), size(0) {}
-    array(T* data, size_t size) : data(data), size(size) {}
+    array(T* srcData, size_t srcSize) : data(srcData), size(srcSize) {}
 
     T* getData() { return data; }
     const T* getData() const { return data; }
@@ -284,7 +283,7 @@ namespace vessl
     
   public:
     matrix() = default;
-    matrix(T* data, size_t rows, size_t cols) : data(data, rows, cols) {}
+    matrix(T* srcData, size_t rows, size_t cols) : data(srcData, rows, cols) {}
 
     T* getData() { return *data; }
     const T* getData() const { return *data; }
@@ -679,7 +678,7 @@ namespace vessl
   {
     processor<T>* proc;
     T sample;
-    procSample(processor<T>& proc, T sample) : proc(&proc), sample(sample) {}
+    procSample(processor<T>& inProc, T inSamp) : proc(&inProc), sample(inSamp) {}
     T& operator>>(T& out) { out = proc->process(sample); return out; }
   };
   
@@ -688,7 +687,7 @@ namespace vessl
   {
     processor<T>* proc;
     array<T> block;
-    procBlock(processor<T>& proc, array<T> arr) : proc(&proc), block(arr) {}
+    procBlock(processor<T>& inProc, array<T> inBlock) : proc(&inProc), block(inBlock) {}
     // implies in-place processing of block (but what if it didn't? how do?)
     procBlock operator>>(processor<T>& next) { proc->process(block, block); return procBlock(next, block); }
     array<T> operator>>(array<T> out) { proc->process(block, out); return out; }
@@ -702,11 +701,11 @@ namespace vessl
   {
     processor<T>* proc;
     source<T>* src;
-    procStream(processor<T>& proc, source<T>& src) : proc(&proc), src(&src) {}
+    procStream(processor<T>& inProc, source<T>& inSource) : proc(&inProc), src(&inSource) {}
     binary_t isEmpty() const override { return src->isEmpty(); }
     T read() override { return proc->process(src->read()); }
     T& operator>>(T& rhs) { rhs = read(); return rhs; }
-    procStream operator>>(processor<T>& proc) { return procStream(proc, *this); }
+    procStream operator>>(processor<T>& inProc) { return procStream(inProc, *this); }
     sink<T>& operator>>(sink<T>& out) { proc->process(*src, out); return out; }
     array<T> operator>>(array<T> out) { typename array<T>::writer w = out.getWriter(); proc->process(*src, w); return out; }
   };
@@ -791,6 +790,11 @@ namespace vessl
     
     template<typename T>
     parameter(const desc& inDesc, const data<T>& inData) : description(inDesc), pdata(&const_cast<data<T>&>(inData).value) {}
+      
+    // explicitly declared copy-constructors so that they will be used instead of the copy-assignment override
+    // when returning parameter objects by value (as in plist::elementAt implementations)
+    constexpr parameter(parameter& param) : description(param.description), pdata(param.pdata) {};
+    constexpr parameter(const parameter& param) : description(param.description), pdata(const_cast<void*>(param.pdata)) {};
     
     const desc& getDescription() const { return description; }
     
@@ -988,7 +992,7 @@ namespace vessl
     virtual ~unit() = default;
     
     // common interface for setting sample rate, for those units that might need it.
-    virtual void setSampleRate(analog_t sr) {}
+    virtual void setSampleRate(analog_t) {}
     
     // providing a description is optional, but useful.
     virtual description getDescription() const { return { "", nullptr, 0 }; }
@@ -1123,7 +1127,7 @@ namespace vessl
   {
     struct white
     {
-      explicit white(analog_t sampleRate) {}
+      explicit white(analog_t sampleRate) { (void)sampleRate; }
       analog_t operator()() const { return random::range<analog_t>(0, 1); }
     };
 
@@ -1144,13 +1148,20 @@ namespace vessl
       };
       
     public:
-      explicit pink(analog_t sampleRate) {}
+      explicit pink(analog_t sampleRate) { (void)sampleRate; }
       
       analog_t operator()()
       {
         int lastKey = key;
         analog_t sum = 0;
-        key = key == MAX_KEY ? 0 : ++key;
+        if (key == MAX_KEY)
+        {
+          key = 0;
+        }
+        else
+        {
+          ++key;
+        }
 
         int diff = lastKey ^ key;
         for (int i = 0; i < COUNT; ++i)
@@ -1212,7 +1223,7 @@ namespace vessl
       analog_t hz;
       analog_t q;
       gain     g;
-      args(analog_t sr, analog_t hz, analog_t q, gain g) : sr(sr), hz(hz), q(q), g(g) {}
+      args(analog_t inSr, analog_t inHz, analog_t inQ, gain inGain) : sr(inSr), hz(inHz), q(inQ), g(inGain) {}
       // helper for biquad
       analog_t omega() const { return hz * math::pi<analog_t>() / sr; }
     };
@@ -1370,7 +1381,7 @@ namespace vessl
     void tick(size_t t) { ticks += t; }
 
     // subclass can override this to be notified every time they receive a clock pulse
-    virtual void tock(size_t sampleDelay) {}
+    virtual void tock(size_t sampleDelay) { (void)sampleDelay; }
     
   public:
     virtual ~clockable() = default;
@@ -1443,7 +1454,7 @@ namespace vessl
     {
       analog_t pulseWidth;
       square() : pulseWidth(0.5) {}
-      explicit square(analog_t pulseWidth) : pulseWidth(pulseWidth) {}
+      explicit square(analog_t inPulseWidth) : pulseWidth(inPulseWidth) {}
       T evaluate(analog_t phase) const override { return phase < pulseWidth ? 1 : -1; }
     };
 
@@ -1453,7 +1464,7 @@ namespace vessl
     {
       analog_t pulseWidth;
       clock() : pulseWidth(0.5) {}
-      explicit clock(analog_t pulseWidth) : pulseWidth(pulseWidth) {}
+      explicit clock(analog_t inPulseWidth) : pulseWidth(inPulseWidth) {}
       T evaluate(analog_t phase) const override { return phase < pulseWidth ? 1 : 0; }
     };
   }
@@ -1622,8 +1633,8 @@ namespace vessl
       analog_t dt;
     };
   protected:
-    envelope(stage* stages, size_t stageCount, analog_t sampleRate) : unitGenerator<T>()
-    , stages(stages, stageCount), stageIdx(0), final(sampleRate) {}
+    envelope(stage* stageData, size_t stageDataSize, analog_t sampleRate) : unitGenerator<T>()
+    , stages(stageData, stageDataSize), stageIdx(0), final(sampleRate) {}
     
   public:
     void setSampleRate(float sampleRate) override;
@@ -1690,12 +1701,12 @@ namespace vessl
   template<typename T>
   class asr : public ad<T>
   {
-    T triggerThreshold;
+    T trigThreshold;
     binary_t gateOn;
     
   public:
     asr(analog_t attackDuration, analog_t decayDuration, analog_t sampleRate, T triggerThreshold = T(0))
-    : ad<T>(attackDuration, decayDuration, sampleRate), triggerThreshold(triggerThreshold), gateOn(false) {}
+    : ad<T>(attackDuration, decayDuration, sampleRate), trigThreshold(triggerThreshold), gateOn(false) {}
 
     using ad<T>::attack;
     typename envelope<T>::stage& release() { return envelope<T>::finalStage(); }
@@ -1764,7 +1775,7 @@ namespace vessl
     // note: choice of epsilon will depend on the amount of noise in the signal to be slewed.
     // the default value was chosen based on testing with an OWL module's audio input.
     slew(analog_t sampleRate, analog_t riseRate, analog_t fallRate, T initialValue = T(0), T epsilon = math::epsilon<T>()*1000)
-    : unitProcessor<T>(), epsilon(epsilon), dt(1.0f/sampleRate)
+    : unitProcessor<T>(), eps(epsilon), dt(1.0f/sampleRate)
     {
       params.rise.value = riseRate; params.fall.value = fallRate; params.output.value = initialValue;
     }
@@ -1784,8 +1795,8 @@ namespace vessl
   protected:
     parameter elementAt(size_t index) const override
     {
-      parameter plist[plsz] = { rise(), fall(), rising(), falling(), value() };
-      return plist[index];
+      parameter p[plsz] = { rise(), fall(), rising(), falling(), value() };
+      return p[index];
     }
     
   private:
@@ -1797,7 +1808,7 @@ namespace vessl
       binary_p falling;
       param<T> output;
     } params;
-    T epsilon;
+    T eps;
     analog_t dt;
   };
 
@@ -1880,8 +1891,8 @@ namespace vessl
   class delay : public unitProcessor<T>, protected plist<2>
   {
   public:
-    delay(array<T> buffer, analog_t sampleRate, analog_t delayInSeconds = 0, analog_t feedbackAmount = 0)
-    : unitProcessor<T>(), buffer(buffer.getData(), buffer.getSize()), dt(1.0f/sampleRate)
+    delay(array<T> delayBuffer, analog_t sampleRate, analog_t delayInSeconds = 0, analog_t feedbackAmount = 0)
+    : unitProcessor<T>(), buffer(delayBuffer.getData(), delayBuffer.getSize()), dt(1.0f/sampleRate)
     {
       params.time.value = duration::fromSeconds(delayInSeconds, sampleRate);
       mDelayInSamples = params.time.value.samples;
@@ -1930,8 +1941,8 @@ namespace vessl
   class follow : public unitProcessor<T>, protected plist<1>
   {
   public:
-    follow(array<T> window, analog_t sampleRate, analog_t responseTimeInSeconds)
-    : unitProcessor<T>(), writer(window), window(window)
+    follow(array<T> windowArray, analog_t sampleRate, analog_t responseTimeInSeconds)
+    : unitProcessor<T>(), writer(windowArray), window(windowArray)
     , delta(math::exp(-1.0 / (sampleRate*responseTimeInSeconds)))
     , previous(0), current(0)
     {
@@ -1979,7 +1990,7 @@ namespace vessl
   class freeze : public unit, public processor<T>, public generator<T>, protected plist<4>
   {
   public:
-    explicit freeze(array<T> buffer, float sampleRate) : unit(), buffer(buffer.getData(), buffer.getSize())
+    explicit freeze(array<T> freezeBuffer, float sampleRate) : unit(), buffer(freezeBuffer.getData(), freezeBuffer.getSize())
     , mPhase(0), crossfade(0.75f), freezeDelay(0), freezeSize(0), readRate(1), dt(1.0/sampleRate)
     {
       params.size.value.samples = buffer.getSize()-1;
@@ -2052,7 +2063,7 @@ namespace vessl
   public:
     typedef H<T> function;
     
-    explicit filter(analog_t sampleRate) : unitProcessor<T>(), sampleRate(sampleRate)
+    explicit filter(analog_t sampleRate) : unitProcessor<T>(), sr(sampleRate)
     {
       params.fHz.value = sampleRate;
       params.q.value = 1;
@@ -2060,14 +2071,14 @@ namespace vessl
     }
     
     filter(analog_t sampleRate, analog_t freqInHz, analog_t kyu = filtering::q::butterworth<analog_t>(), gain emphasis = gain::fromDecibels(0) ) 
-    : unitProcessor<T>(), sampleRate(sampleRate)
+    : unitProcessor<T>(), sr(sampleRate)
     {
       params.fHz.value = freqInHz;
       params.q.value = kyu;
       params.emphasis.value = emphasis;
     }
     
-    void setSampleRate(analog_t sampleRate) override { this->sampleRate = sampleRate; }
+    void setSampleRate(analog_t sampleRate) override { sr = sampleRate; }
     const parameters& getParameters() const override { return *this; }
 
     parameter fHz() const { return params.fHz({ "fHz", 'f', analog_p::type }); }
@@ -2079,7 +2090,7 @@ namespace vessl
     {
       T out;
       filtering::args fargs = {
-        sampleRate,
+        sr,
         params.fHz.value,
         math::max(params.q.value, 0.01),
         params.emphasis.value
@@ -2091,7 +2102,7 @@ namespace vessl
     void process(array<T> in, array<T> out) override
     {
       filtering::args fargs = {
-        sampleRate,
+        sr,
         params.fHz.value,
         math::max(params.q.value, 0.01),
         params.emphasis.value
@@ -2110,7 +2121,7 @@ namespace vessl
       param<gain> emphasis;
     } params;
     function func;
-    analog_t sampleRate;
+    analog_t sr;
   };
 
   // designed to work with floating point types.
@@ -2313,9 +2324,9 @@ namespace vessl
   matrix<T> matrix<T>::add(matrix other, matrix dest) const
   {
     VASSERT(getRows() == other.getRows() && getRows() == dest.getRows() && getColumns() == other.getColumns() && getColumns() == dest.getColumns(), "matrices do not have the same dimentions");
-    array lhs(getData(), getSize());
-    array rhs(other.getData(), other.getSize());
-    array dst(dest.getData(), dest.getSize());
+    array<T> lhs(getData(), getSize());
+    array<T> rhs(other.getData(), other.getSize());
+    array<T> dst(dest.getData(), dest.getSize());
     lhs.add(rhs, dst);
     return dest;
   }
@@ -2324,9 +2335,9 @@ namespace vessl
   matrix<T> matrix<T>::subtract(matrix other, matrix dest) const
   {
     VASSERT(getRows() == other.getRows() && getRows() == dest.getRows() && getColumns() == other.getColumns() && getColumns() == dest.getColumns(), "matrices do not have the same dimentions");
-    array lhs(getData(), getSize());
-    array rhs(other.getData(), other.getSize());
-    array dst(dest.getData(), dest.getSize());
+    array<T> lhs(getData(), getSize());
+    array<T> rhs(other.getData(), other.getSize());
+    array<T> dst(dest.getData(), dest.getSize());
     lhs.subtract(rhs, dst);
     return dest;
   }
@@ -2334,8 +2345,8 @@ namespace vessl
   template<typename T>
   matrix<T> matrix<T>::scale(T value, matrix dest) const
   {
-    array lhs(getData(), getSize());
-    array dst(dest.getData(), dest.getSize());
+    array<T> lhs(getData(), getSize());
+    array<T> dst(dest.getData(), dest.getSize());
     lhs.scale(value, dst);
     return dest;
   }
@@ -2766,9 +2777,9 @@ namespace vessl
   template<typename T>
   void envelope<T>::trigger()
   {
-    for (stage& stage : stages)
+    for (stage& s : stages)
     {
-      stage.reset();
+      s.reset();
     }
     final.reset();
     params.eoc.value = false;
@@ -2795,9 +2806,9 @@ namespace vessl
   template<typename T>
   void envelope<T>::setSampleRate(analog_t sampleRate)
   {
-    for (stage& stage : stages)
+    for (stage& s : stages)
     {
-      stage.setSampleRate(sampleRate);
+      s.setSampleRate(sampleRate);
     }
     final.setSampleRate(sampleRate);
   }
@@ -2805,7 +2816,7 @@ namespace vessl
   template<typename T>
   void asr<T>::gate(T value)
   {
-    binary_t valueOn = value > triggerThreshold;
+    binary_t valueOn = value > trigThreshold;
     T attackTarget = attack().target().template read<T>();
     if (!gateOn && valueOn)
     {
@@ -2829,8 +2840,8 @@ namespace vessl
   template<typename T>
   T slew<T>::process(const T& v)
   {
-    binary_t isRise = v > params.output.value+epsilon;
-    binary_t isFall = v < params.output.value-epsilon;
+    binary_t isRise = v > params.output.value+eps;
+    binary_t isFall = v < params.output.value-eps;
     if (isRise)
     {
       params.output.value = math::min(v, params.output.value + params.rise.value*dt);

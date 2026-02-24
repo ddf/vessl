@@ -73,21 +73,43 @@ namespace vessl
 {
   using char_t    = char;
   using size_t    = uint64_t;
-  // (-1,1) phase represented using the full range of int32 (essentially fixed-point)
-  using phase_t   = int32_t;
+  // [0,1) phase represented using the full range of uint32 (essentially fixed-point)
+  using phase_t   = uint32_t;
   using binary_t  = bool;
   using digital_t = int64_t;
   using analog_t  = float;
   
-  static constexpr phase_t PHASE_MAX  = INT32_MAX;
-  static constexpr phase_t PHASE_MIN  = INT32_MIN;
-  static constexpr phase_t PHASE_HALF = ((phase_t)0x3fffffffL);
+  static constexpr phase_t PHASE_MAX  = UINT32_MAX;
+  static constexpr phase_t PHASE_HALF = ((phase_t)INT32_MAX);
   static constexpr phase_t PHASE_ZERO = ((phase_t)0u);
   
   // we use this in place of static_cast throughout the library for non-pointer types
   // so that we can specialize conversions between some of our value types (e.g. phase_t <--> analog_t)
   template<typename T, typename F>
   T cast(F from) { return static_cast<T>(from); }
+  
+  // phase_t <--> analog_t
+  template<>
+  inline phase_t cast<phase_t, analog_t>(analog_t from)
+  {
+    analog_t i;
+    analog_t f = std::modf(from, &i);
+    if (f < 0) f += 1.0f;
+    return static_cast<phase_t>(f * 4294967296.0);
+  }
+  
+  template<>
+  inline analog_t cast<analog_t, phase_t>(phase_t from)
+  {
+    return static_cast<analog_t>(from) / 4294967296.0f;
+  }
+  
+  // phase_t <--> binary_t
+  template<>
+  inline binary_t cast<binary_t, phase_t>(phase_t from) { return from > PHASE_HALF; }
+  
+  template<>
+  inline phase_t cast<phase_t, binary_t>(binary_t from) { return from ? PHASE_MAX : PHASE_ZERO; }
   
   template<typename T>
   class source
@@ -939,6 +961,13 @@ namespace vessl
   };
   
   template<>
+  struct parameter::data<phase_t>
+  {
+    phase_t value;
+    static constexpr auto type = valuetype::phase;
+  };
+  
+  template<>
   struct parameter::data<gain>
   {
     gain value = gain();
@@ -963,6 +992,7 @@ namespace vessl
   typedef param<analog_t>  analog_p;
   typedef param<digital_t> digital_p;
   typedef param<binary_t>  binary_p;
+  typedef param<phase_t>   phase_p;
   typedef param<gain>      gain_p;
   typedef param<duration>  duration_p;
 
@@ -1147,7 +1177,7 @@ namespace vessl
     T smooth(T value, T target, analog_t degree = 0.9f) { return value*degree + (1.0 - degree)*target; }
     
     template<>
-    inline digital_t smooth(digital_t value, digital_t target, analog_t degree) { return (value*degree + target)/(degree+1);  }
+    inline digital_t smooth<digital_t>(digital_t value, digital_t target, analog_t degree) { return (value*degree + target)/(degree+1);  }
   }
 
   // analog unipolar noise generators that generate values in the range [0,1]
@@ -1466,7 +1496,7 @@ namespace vessl
     waveform& operator=(const waveform&) = default;
     waveform& operator=(waveform&&) = default;
 
-    virtual T evaluate(analog_t phase) const = 0;  // NOLINT(portability-template-virtual-member-function)
+    virtual T evaluate(phase_t phase) const = 0;  // NOLINT(portability-template-virtual-member-function)
   };
 
   namespace waves
@@ -1474,26 +1504,27 @@ namespace vessl
     template<typename T = analog_t>
     struct sine final : waveform<T>
     {
-      T evaluate(analog_t phase) const override { return math::sin(math::twoPi<T>() * phase); }
+      // default implementation assumes default parameter type (floating point)
+      T evaluate(phase_t phase) const override { return math::sin(math::twoPi<T>() * cast<T>(phase)); }
     };
 
     template<typename T = analog_t>
     struct square final : waveform<T>
     {
-      analog_t pulseWidth;
-      square() : pulseWidth(0.5) {}
-      explicit square(analog_t inPulseWidth) : pulseWidth(inPulseWidth) {}
-      T evaluate(analog_t phase) const override { return phase < pulseWidth ? 1 : -1; }
+      phase_t pulseWidth;
+      square() : pulseWidth(PHASE_HALF) {}
+      explicit square(phase_t inPulseWidth) : pulseWidth(inPulseWidth) {}
+      T evaluate(phase_t phase) const override { return phase < pulseWidth ? 1 : -1; }
     };
 
     // same as square, but unipolar
     template<typename T = analog_t>
     struct clock final : waveform<T>
     {
-      analog_t pulseWidth;
-      clock() : pulseWidth(0.5) {}
-      explicit clock(analog_t inPulseWidth) : pulseWidth(inPulseWidth) {}
-      T evaluate(analog_t phase) const override { return phase < pulseWidth ? 1 : 0; }
+      phase_t pulseWidth;
+      clock() : pulseWidth(PHASE_HALF) {}
+      explicit clock(phase_t inPulseWidth) : pulseWidth(inPulseWidth) {}
+      T evaluate(phase_t phase) const override { return phase < pulseWidth ? 1 : 0; }
     };
   }
 
@@ -1518,7 +1549,7 @@ namespace vessl
     void set(const size_t i, T val);
     
     // implement waveform:
-    T evaluate(analog_t phase) const override;
+    T evaluate(phase_t phase) const override;
   };
   
   // generates stepped analog noise at rate values per second.
@@ -1851,10 +1882,10 @@ namespace vessl
 
     template<typename... Ts>
     explicit oscil(analog_t sampleRate, analog_t freqInHz, Ts... wargs)
-    : unitGenerator<T>(), waveform(wargs...), phase(0), dt(1.0f/sampleRate)
+    : unitGenerator<T>(), waveform(wargs...), phase(PHASE_ZERO), dt(cast<phase_t>(1.0f/sampleRate))
     { params.fHz.value = freqInHz; }
     
-    void setSampleRate(float sampleRate) override { dt = 1.0f / sampleRate;}
+    void setSampleRate(float sampleRate) override { dt = cast<phase_t>(1.0f / sampleRate);}
 
     W waveform;
     
@@ -1867,11 +1898,12 @@ namespace vessl
     // v/oct (exponential) frequency modulation
     parameter fmExp() const { return params.fmExp({ "fm (v/oct)", 'v', analog_p::type }); }
     // phase modulation
-    parameter pm() const { return params.pm({ "phase mod", 'p', analog_p::type }); }
+    parameter pm() const { return params.pm({ "phase mod", 'p', phase_p::type }); }
 
     T generate() override;
 
-    void reset() { phase = 0; }
+    [[nodiscard]] phase_t getPhase() const { return phase; }
+    void reset() { phase = PHASE_ZERO; }
     
   protected:
     parameter elementAt(size_t index) const override
@@ -1886,10 +1918,10 @@ namespace vessl
       analog_p fHz;
       analog_p fmLin;
       analog_p fmExp;
-      analog_p pm;
+      phase_p  pm;
     } params;
-    analog_t phase;
-    analog_t dt;
+    phase_t  phase;
+    phase_t  dt;
   };
 
   template<typename T>
@@ -1912,7 +1944,7 @@ namespace vessl
     T read(analog_t sampleDelay) const;
 
     // phase will be wrapped to [-1,1] where 0 is the oldest sample recorded
-    T evaluate(analog_t phase) const override;
+    T evaluate(phase_t phase) const override;
   };
   
   template<typename T, typename I = interpolation::linear<T>>
@@ -2232,28 +2264,6 @@ namespace vessl
   /////////////////////////////////////////////////////////////////////////////////////////////////////
   // implementation
   //
-  
-  // phase_t <--> analog_t
-  template<>
-  inline phase_t cast<phase_t, analog_t>(analog_t from)
-  {
-    analog_t i; 
-    analog_t f = math::mod(from, &i);
-    return static_cast<phase_t>(f * 2147483648.0);
-  }
-  
-  template<>
-  inline analog_t cast<analog_t, phase_t>(phase_t from)
-  {
-    return static_cast<analog_t>(from) / 2147483648.0f;
-  }
-  
-  // phase_t <--> binary_t
-  template<>
-  inline binary_t cast<binary_t, phase_t>(phase_t from) { return from > PHASE_HALF; }
-  
-  template<>
-  inline phase_t cast<phase_t, binary_t>(binary_t from) { return from ? PHASE_MAX : PHASE_ZERO; }
 
   template<typename T>
   void processor<T>::process(source<T>& in, sink<T>& out)
@@ -2277,8 +2287,7 @@ namespace vessl
   void array<T>::writer::write(const reader& r)
   {
     size_t rsz = r.available();
-    size_t wsz = available();
-    VASSERT(wsz >= rsz, "Not enough space in writer for the contents of reader");
+    VASSERT(available() >= rsz, "Not enough space in writer for the contents of reader");
     const T* rh = *r;
     memcpy(static_cast<void*>(head), static_cast<const void*>(rh), rsz * sizeof(T));
     head += rsz;
@@ -2748,11 +2757,9 @@ namespace vessl
 
   // @todo ARM specializations for this that utilize the table-based interpolation methods.
   template<typename T, size_t N, typename I>
-  T wavetable<T, N, I>::evaluate(analog_t phase) const
+  T wavetable<T, N, I>::evaluate(phase_t phase) const
   {
-    analog_t idx = phase * N;
-    while (idx > N) { idx -= N; }
-    while (idx < 0) { idx += N; }
+    analog_t idx = cast<analog_t>(phase) * N;
     return interpolation::sample<T, I>(buffer, idx);
   }
 
@@ -2912,9 +2919,9 @@ namespace vessl
   template<class W>
   typename W::SampleType oscil<W>::generate()
   {
-    typename W::SampleType val = waveform.evaluate(phase + pm());
-    phase += (fHz() * math::exp2(cast<analog_t>(fmExp())) + fmLin()) * dt;
-    phase = math::wrap01(phase);
+    typename W::SampleType val = waveform.evaluate(phase + params.pm.value);
+    analog_t f = params.fHz.value * math::exp2(params.fmExp.value) + params.fmLin.value;
+    phase = phase + static_cast<phase_t>(f * dt);
     return val;
   }
 
@@ -2946,11 +2953,10 @@ namespace vessl
   }
 
   template<typename T>
-  T delayline<T>::evaluate(analog_t phase) const
+  T delayline<T>::evaluate(phase_t phase) const
   {
     analog_t fSize = cast<analog_t>(getSize());
-    phase = math::wrap<analog_t>(phase, -1.0, 1.0);
-    analog_t sampleDelay = phase > 0 ? (1.0 - phase) * fSize : -phase * fSize;
+    analog_t sampleDelay = cast<analog_t>(PHASE_MAX - phase) * fSize;
     return read<interpolation::linear<T>>(sampleDelay);
   }
 

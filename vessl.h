@@ -71,11 +71,23 @@ static void assert(bool condition) { }
 // Note: In all classes using typename T, it is assumed to be POD and to have support for all arithmetic operators
 namespace vessl
 {
-  using char_t = char;
-  using size_t = uint64_t;
-  using binary_t = bool;
+  using char_t    = char;
+  using size_t    = uint64_t;
+  // (-1,1) phase represented using the full range of int32 (essentially fixed-point)
+  using phase_t   = int32_t;
+  using binary_t  = bool;
   using digital_t = int64_t;
-  using analog_t = float;
+  using analog_t  = float;
+  
+  static constexpr phase_t PHASE_MAX  = INT32_MAX;
+  static constexpr phase_t PHASE_MIN  = INT32_MIN;
+  static constexpr phase_t PHASE_HALF = ((phase_t)0x3fffffffL);
+  static constexpr phase_t PHASE_ZERO = ((phase_t)0u);
+  
+  // we use this in place of static_cast throughout the library for non-pointer types
+  // so that we can specialize conversions between some of our value types (e.g. phase_t <--> analog_t)
+  template<typename T, typename F>
+  T cast(F from) { return static_cast<T>(from); }
   
   template<typename T>
   class source
@@ -483,7 +495,7 @@ namespace vessl
       channels<T, N> result;
       for (size_t i = 0; i < N; ++i)
       {
-        result[i] = static_cast<digital_t>(lhs[i]) ^ static_cast<digital_t>(rhs[i]);
+        result[i] = cast<digital_t>(lhs[i]) ^ cast<digital_t>(rhs[i]);
       }
       return result;
     }
@@ -494,10 +506,10 @@ namespace vessl
   namespace math
   {
     template<typename T>
-    constexpr T e() { return static_cast<T>(2.71828182845904523536); }
+    constexpr T e() { return cast<T>(2.71828182845904523536); }
     
     template<typename T>
-    constexpr T pi() { return static_cast<T>(3.1415926535897932385); }
+    constexpr T pi() { return cast<T>(3.1415926535897932385); }
 
     template<typename T>
     constexpr T twoPi() { return pi<T>() * 2; }
@@ -600,7 +612,7 @@ namespace vessl
     template<>
     inline analog_t xore(const analog_t& a, const analog_t& b)
     {
-      return xore(static_cast<digital_t>(a), static_cast<digital_t>(b));
+      return xore(cast<digital_t>(a), cast<digital_t>(b));
     }
   }
   
@@ -611,14 +623,14 @@ namespace vessl
     
     gain() : db(0) {}
     explicit gain(analog_t dbv) : db(dbv) {}
-    static analog_t decibelsToScale(analog_t db) { return math::exp10(db*static_cast<analog_t>(0.05));}
-    static analog_t scaleToDecibels(analog_t scale) { return math::log10(scale)*static_cast<analog_t>(20.0);}
+    static analog_t decibelsToScale(analog_t db) { return math::exp10(db*cast<analog_t>(0.05));}
+    static analog_t scaleToDecibels(analog_t scale) { return math::log10(scale)*cast<analog_t>(20.0);}
     static gain fromScale(analog_t scale) { return gain(scaleToDecibels(scale)); }
     static gain fromDecibels(analog_t dB) { return gain(dB); }
 
     // implement casting operators so that gain can be used as a parameter type.
     explicit operator binary_t() const { return db >= 0; }
-    explicit operator digital_t() const { return static_cast<digital_t>(db); }
+    explicit operator digital_t() const { return cast<digital_t>(db); }
     explicit operator analog_t() const { return db; }
 
     analog_t toScale() const { return decibelsToScale(db); }
@@ -644,11 +656,11 @@ namespace vessl
     duration() : samples(0) {}
     // conversions for parameter
     explicit duration(binary_t b) : samples(b) {}
-    explicit duration(size_t s): samples(static_cast<analog_t>(s)) {}
-    explicit duration(digital_t i) : samples(static_cast<analog_t>(i)) {}
+    explicit duration(size_t s): samples(cast<analog_t>(s)) {}
+    explicit duration(digital_t i) : samples(cast<analog_t>(i)) {}
     explicit duration(analog_t a) : samples(a) {}
     explicit operator binary_t() const { return math::abs(samples) >= math::epsilon<analog_t>(); }
-    explicit operator digital_t() const { return static_cast<digital_t>(samples); }
+    explicit operator digital_t() const { return cast<digital_t>(samples); }
     explicit operator analog_t() const { return samples;}
 
     static duration fromBpm(analog_t bpm, analog_t sampleRate) { return duration(sampleRate/(bpm*B2F)); }
@@ -744,6 +756,7 @@ namespace vessl
       binary = 1, // on/off (binary_t)
       digital = 2, // integral values (digital_t)
       analog = 3, // floating point values (analog_t)
+      phase = 4, // phase_t values
       // space for more built-ins
 
       // user provided type, stored as a void*, must be convertible to all other parameter types.
@@ -801,16 +814,28 @@ namespace vessl
     template<typename T>
     T read() const
     {
-      return *static_cast<const T*>(pdata);
+      switch (description.type)
+      {
+        case valuetype::none: return T(0);
+        case valuetype::binary: return cast<T>(*static_cast<binary_t*>(pdata));
+        case valuetype::digital: return cast<T>(*static_cast<digital_t*>(pdata));
+        case valuetype::analog: return cast<T>(*static_cast<analog_t*>(pdata));
+        case valuetype::phase: return cast<T>(*static_cast<phase_t*>(pdata));
+        case valuetype::user: break;
+      }
+      // attempt to cast data to T, might work?
+      return *static_cast<T*>(pdata);
     }
 
     binary_t  readBinary()  const { return read<binary_t>(); }
     digital_t readDigital() const { return read<digital_t>(); }
     analog_t  readAnalog()  const { return read<analog_t>(); }
+    phase_t   readPhase()   const { return read<phase_t>(); }
     
     explicit operator binary_t()  const { return read<binary_t>(); }
     explicit operator digital_t() const { return read<digital_t>(); }
     explicit operator analog_t()  const { return read<analog_t>(); }
+    explicit operator phase_t()   const { return read<phase_t>(); }
 
     // static-cast T to parameter type before assign
     template<typename T>
@@ -819,9 +844,10 @@ namespace vessl
       switch (description.type)
       {
         case valuetype::none: break;
-        case valuetype::binary: *static_cast<binary_t*>(pdata)   = static_cast<binary_t>(value); break;
-        case valuetype::digital: *static_cast<digital_t*>(pdata) = static_cast<digital_t>(value); break;
-        case valuetype::analog: *static_cast<analog_t*>(pdata)   = static_cast<analog_t>(value); break;
+        case valuetype::binary: *static_cast<binary_t*>(pdata)   = cast<binary_t>(value); break;
+        case valuetype::digital: *static_cast<digital_t*>(pdata) = cast<digital_t>(value); break;
+        case valuetype::analog: *static_cast<analog_t*>(pdata)   = cast<analog_t>(value); break;
+        case valuetype::phase: *static_cast<phase_t*>(pdata)     = cast<phase_t>(value); break;
         // attempt to cast data to T, might work?
         case valuetype::user: *static_cast<T*>(pdata) = value; break;
       }
@@ -845,14 +871,16 @@ namespace vessl
         case valuetype::binary: *static_cast<binary_t*>(pdata)   = rhs.readBinary(); break;
         case valuetype::digital: *static_cast<digital_t*>(pdata) = rhs.readDigital(); break;
         case valuetype::analog: *static_cast<analog_t*>(pdata)   = rhs.readAnalog(); break;
+        case valuetype::phase: *static_cast<phase_t*>(pdata)     = rhs.readPhase(); break;
         case valuetype::user: 
           switch (rhs.description.type)
           {
-        case valuetype::none: break;
-        case valuetype::binary: write(rhs.readBinary()); break;
-        case valuetype::digital: write(rhs.readDigital()); break;
-        case valuetype::analog: write(rhs.readAnalog()); break;
-        case valuetype::user: VASSERT(false, "Can't assign user parameter to user parameter with operater="); break;
+          case valuetype::none: break;
+          case valuetype::binary: write(rhs.readBinary()); break;
+          case valuetype::digital: write(rhs.readDigital()); break;
+          case valuetype::analog: write(rhs.readAnalog()); break;
+          case valuetype::phase: write(rhs.readPhase()); break;
+          case valuetype::user: VASSERT(false, "Can't assign user parameter to user parameter with operater="); break;
           }
           break;
         }
@@ -1063,7 +1091,7 @@ namespace vessl
     T range(T low, T high)
     {
       static constexpr analog_t SCALE = 1/4294967296.0;
-      analog_t r = static_cast<analog_t>(u32()) * SCALE;
+      analog_t r = cast<analog_t>(u32()) * SCALE;
       return low + r*(high-low);
     }
   }
@@ -1170,7 +1198,7 @@ namespace vessl
           {
             whiteValues[i] = random::u32() % (RANGE / COUNT);
           }
-          sum += static_cast<analog_t>(whiteValues[i]);
+          sum += cast<analog_t>(whiteValues[i]);
         }
         maxSum = math::max(sum, maxSum);
         analog_t n = sum / maxSum;
@@ -1251,13 +1279,13 @@ namespace vessl
     namespace q
     {
       template<typename T>
-      constexpr T butterworth() { return static_cast<T>(0.70710678118); } // 1/sqrt(2)
+      constexpr T butterworth() { return cast<T>(0.70710678118); } // 1/sqrt(2)
 
       template<typename T>
-      constexpr T sallenKey() { return static_cast<T>(0.5); } 
+      constexpr T sallenKey() { return cast<T>(0.5); } 
 
       template<typename T>
-      constexpr T bessel() { return static_cast<T>(0.57735026919); } // 1/sqrt(3)
+      constexpr T bessel() { return cast<T>(0.57735026919); } // 1/sqrt(3)
     }
     
     template<typename T>
@@ -2204,6 +2232,28 @@ namespace vessl
   /////////////////////////////////////////////////////////////////////////////////////////////////////
   // implementation
   //
+  
+  // phase_t <--> analog_t
+  template<>
+  inline phase_t cast<phase_t, analog_t>(analog_t from)
+  {
+    analog_t i; 
+    analog_t f = math::mod(from, &i);
+    return static_cast<phase_t>(f * 2147483648.0);
+  }
+  
+  template<>
+  inline analog_t cast<analog_t, phase_t>(phase_t from)
+  {
+    return static_cast<analog_t>(from) / 2147483648.0f;
+  }
+  
+  // phase_t <--> binary_t
+  template<>
+  inline binary_t cast<binary_t, phase_t>(phase_t from) { return from > PHASE_HALF; }
+  
+  template<>
+  inline phase_t cast<phase_t, binary_t>(binary_t from) { return from ? PHASE_MAX : PHASE_ZERO; }
 
   template<typename T>
   void processor<T>::process(source<T>& in, sink<T>& out)
@@ -2424,14 +2474,14 @@ namespace vessl
 
   inline void clockable::clock()
   {
-    tempo.samples = static_cast<analog_t>(math::constrain(ticks, periodMin, periodMax));
+    tempo.samples = cast<analog_t>(math::constrain(ticks, periodMin, periodMax));
     ticks = 0;
     tock(0);
   }
 
   inline void clockable::clock(period_t sampleDelay)
   {
-    tempo.samples = static_cast<analog_t>(math::constrain(ticks + sampleDelay, periodMin, periodMax));
+    tempo.samples = cast<analog_t>(math::constrain(ticks + sampleDelay, periodMin, periodMax));
     ticks = 0;
     tock(sampleDelay);
   }
@@ -2439,7 +2489,7 @@ namespace vessl
   template<typename T>
   T interpolation::nearest<T>::operator()(const T* buffer, analog_t fracIdx)
   {
-    return buffer[static_cast<size_t>(math::round(fracIdx))];
+    return buffer[cast<size_t>(math::round(fracIdx))];
   }
 
   template<typename T>
@@ -2447,7 +2497,7 @@ namespace vessl
   {
     analog_t idx;
     analog_t frac = math::mod(fracIdx, &idx);
-    size_t x0 = static_cast<size_t>(idx);
+    size_t x0 = cast<size_t>(idx);
     return buffer[x0] + (buffer[x0 + 1] - buffer[x0]) * frac;
   }
 
@@ -2762,7 +2812,7 @@ namespace vessl
   template<typename E>
   T envelope<T>::stage::step()
   {
-    analog_t s = dt / math::max<analog_t>(static_cast<analog_t>(duration()), dt);
+    analog_t s = dt / math::max<analog_t>(cast<analog_t>(duration()), dt);
     time += s;
     analog_t t = math::constrain<analog_t>(time, 0.0, 1.0);
     params.output.value = easing::interp<E, T>(begin, params.target.value, t);
@@ -2863,7 +2913,7 @@ namespace vessl
   typename W::SampleType oscil<W>::generate()
   {
     typename W::SampleType val = waveform.evaluate(phase + pm());
-    phase += (fHz() * math::exp2(static_cast<analog_t>(fmExp())) + fmLin()) * dt;
+    phase += (fHz() * math::exp2(cast<analog_t>(fmExp())) + fmLin()) * dt;
     phase = math::wrap01(phase);
     return val;
   }
@@ -2882,12 +2932,12 @@ namespace vessl
   T delayline<T>::read(analog_t sampleDelay) const
   {
     assert(sampleDelay >= 0 && sampleDelay < getSize());
-    analog_t fSize = static_cast<analog_t>(getSize());
+    analog_t fSize = cast<analog_t>(getSize());
     sampleDelay = fSize - 1 - sampleDelay;
-    analog_t fidx = static_cast<analog_t>(getWriteIndex()) + sampleDelay;
+    analog_t fidx = cast<analog_t>(getWriteIndex()) + sampleDelay;
     analog_t idx;
     analog_t f = math::mod(fidx, &idx);
-    size_t x0 = static_cast<size_t>(idx) % getSize();
+    size_t x0 = cast<size_t>(idx) % getSize();
     size_t x1 = (x0 + 1) % getSize();
     size_t x2 = (x0 + 2) % getSize();
     const T* data = getData();
@@ -2898,7 +2948,7 @@ namespace vessl
   template<typename T>
   T delayline<T>::evaluate(analog_t phase) const
   {
-    analog_t fSize = static_cast<analog_t>(getSize());
+    analog_t fSize = cast<analog_t>(getSize());
     phase = math::wrap<analog_t>(phase, -1.0, 1.0);
     analog_t sampleDelay = phase > 0 ? (1.0 - phase) * fSize : -phase * fSize;
     return read<interpolation::linear<T>>(sampleDelay);
@@ -2909,9 +2959,9 @@ namespace vessl
   {
     mDelayInSamples = params.time.value.samples;
     // delay time in samples
-    analog_t dts = math::constrain<analog_t>(mDelayInSamples, 0.f, static_cast<analog_t>(buffer.getSize()-1));
+    analog_t dts = math::constrain<analog_t>(mDelayInSamples, 0.f, cast<analog_t>(buffer.getSize()-1));
     analog_t s = buffer.template read<I>(dts);
-    analog_t fbk = math::constrain<analog_t>(static_cast<analog_t>(feedback()), -1.0, 1.0);
+    analog_t fbk = math::constrain<analog_t>(cast<analog_t>(feedback()), -1.0, 1.0);
     buffer.write(in + s * fbk);
     return s;
   }
@@ -2935,9 +2985,9 @@ namespace vessl
         T in = r.read();
         mDelayInSamples = easing::lerp(mDelayInSamples, params.time.value.samples, dst);
         // delay time in samples
-        analog_t dts = math::constrain<analog_t>(mDelayInSamples, 0.f, static_cast<analog_t>(buffer.getSize()-1));
+        analog_t dts = math::constrain<analog_t>(mDelayInSamples, 0.f, cast<analog_t>(buffer.getSize()-1));
         analog_t wet = buffer.template read<I>(dts);
-        analog_t fbk = math::constrain<analog_t>(static_cast<analog_t>(feedback()), -1.0, 1.0);
+        analog_t fbk = math::constrain<analog_t>(cast<analog_t>(feedback()), -1.0, 1.0);
         buffer.write(in + wet*fbk);
         w << wet;
       }
@@ -2953,9 +3003,9 @@ namespace vessl
       // smooth time parameter to prevent crunchiness when it is noisy or changes by large amounts
       analog_t targetSampleDelay = params.time.value.samples;
       // delay time in samples
-      analog_t fts = math::constrain<analog_t>(mDelayInSamples, 0.0, static_cast<analog_t>(buffer.getSize()-1));
-      analog_t tts = math::constrain<analog_t>(targetSampleDelay, 0.0, static_cast<analog_t>(buffer.getSize()-1));
-      analog_t fbk = math::constrain<analog_t>(static_cast<analog_t>(feedback()), -1.0, 1.0);
+      analog_t fts = math::constrain<analog_t>(mDelayInSamples, 0.0, cast<analog_t>(buffer.getSize()-1));
+      analog_t tts = math::constrain<analog_t>(targetSampleDelay, 0.0, cast<analog_t>(buffer.getSize()-1));
+      analog_t fbk = math::constrain<analog_t>(cast<analog_t>(feedback()), -1.0, 1.0);
       
       while (r && w)
       {
@@ -2988,14 +3038,14 @@ namespace vessl
       writer = window.getWriter();
     }
 
-    analog_t t = 1.0 - static_cast<analog_t>(writer.available()) / static_cast<analog_t>(window.getSize());
+    analog_t t = 1.0 - cast<analog_t>(writer.available()) / cast<analog_t>(window.getSize());
     return previous + (current - previous) * t;
   }
 
   template<typename T, typename I>
   T freeze<T, I>::generate() 
   {
-    freezeDelay = static_cast<analog_t>(position());
+    freezeDelay = cast<analog_t>(position());
     freezeSize  = params.size.value.samples;
     analog_t sampleDelay = freezeDelay + (1.0-mPhase)*freezeSize;
     mPhase = math::wrap01(mPhase + rate() / freezeSize);
@@ -3005,7 +3055,7 @@ namespace vessl
   template<typename T, typename I>
   T freeze<T, I>::process(const T& in) 
   {
-    binary_t isEnabled = static_cast<binary_t>(enabled());
+    binary_t isEnabled = cast<binary_t>(enabled());
     analog_t wetLevel = crossfade = (isEnabled ? 1.0 : 0.0);
     T wet = generate();
     if (!isEnabled)
@@ -3114,14 +3164,14 @@ namespace vessl
   template<typename T, uint32_t MaxBits>
   T bitcrush<T, MaxBits>::process(const T& in)
   {
-    rateAlpha += math::max<analog_t>(1.0, static_cast<analog_t>(rate()))*dt;
+    rateAlpha += math::max<analog_t>(1.0, cast<analog_t>(rate()))*dt;
     if (rateAlpha >= 1)
     {
       rateAlpha -= 1;
       currSample = easing::lerp(prevInput, in, rateAlpha);
     }
 
-    analog_t bd = math::constrain<analog_t>(static_cast<analog_t>(depth()), 2.0, MaxBits);
+    analog_t bd = math::constrain<analog_t>(cast<analog_t>(depth()), 2.0, MaxBits);
     analog_t scalar = math::pow<analog_t>(2.0, bd) - 1;
     T val = math::round(currSample*scalar);
     if (mangle())

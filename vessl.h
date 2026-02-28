@@ -27,7 +27,6 @@
 #include <cassert>
 #include <cmath>
 #include <cstdint>
-// ReSharper disable once CppUnusedIncludeDirective
 #include <cstring>
 #include <limits>
 
@@ -53,6 +52,10 @@
 
 #ifdef sin
 #undef sin
+#endif
+
+#ifdef cos
+#undef cos
 #endif
 
 #ifdef exp10
@@ -86,7 +89,7 @@ namespace vessl
   // we use this in place of static_cast throughout the library for non-pointer types
   // so that we can specialize conversions between some of our value types (e.g. phase_t <--> analog_t)
   template<typename T, typename F>
-  T cast(F from) { return static_cast<T>(from); }
+  constexpr T cast(F from) { return static_cast<T>(from); }
   
   // phase_t <--> analog_t
   template<>
@@ -590,19 +593,25 @@ namespace vessl
     }
 
     template<typename T>
-    T sin(T x) { return ::sin(x); }
+    T sinr(T r) { return std::sin(r); }
+    
+    template<typename T>
+    T sinz(phase_t z) { return math::sinr(math::twoPi<T>() * cast<T>(z)); }
 
     template<typename T>
-    T cos(T x) { return ::cos(x); }
+    T cosr(T r) { return std::cos(r); }
+    
+    template<typename T>
+    T cosz(phase_t z) { return math::cosr(math::twoPi<T>()* cast<T>(z)); }
 
     template<typename T>
-    T sqrt(T x) { return ::sqrt(x); }
+    T sqrt(T x) { return std::sqrt(x); }
     
     template<typename T>
     T sqrt2() { static T v = sqrt(2); return v; }
 
     template<typename T>
-    T tan(T x) { return ::tan(x); }
+    T tan(T x) { return std::tan(x); }
     
     template<typename T>
     T wrap(T val, T low, T high)
@@ -1505,7 +1514,7 @@ namespace vessl
     struct sine final : waveform<T>
     {
       // default implementation assumes default parameter type (floating point)
-      T evaluate(phase_t phase) const override { return math::sin(math::twoPi<T>() * cast<T>(phase)); }
+      T evaluate(phase_t phase) const override { return math::sinz<T>(phase); }
     };
 
     template<typename T = analog_t>
@@ -3314,10 +3323,10 @@ namespace vessl
   namespace math
   {
     template<>
-    inline float sin(float x) { return arm_sin_f32(x); }
+    inline float32_t sinr(float32_t r) { return arm_sin_f32(r); }
 
     template<>
-    inline float sqrt(float x)
+    inline float32_t sqrt(float32_t x)
     {
       float out;
       if (ARM_MATH_SUCCESS == arm_sqrt_f32(x, &out))

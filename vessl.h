@@ -352,7 +352,79 @@ namespace vessl
     matrix multiply(matrix other) { return multiply(other, *this); }
     
     // matrix vector multiplication of this and vector, returns dest
-    array<T> multiply(array<T> vector, array<T> dest) const;
+    array<T> multiply(const array<T>& vector, array<T> dest) const;
+  };
+  
+  template<typename T>
+  struct vector3
+  {
+    T x, y, z;
+  
+    constexpr vector3() : x(0), y(0), z(0) {}
+    constexpr vector3(const vector3&) = default;
+    constexpr vector3(T inX, T inY, T inZ) : x(inX), y(inY),  z(inZ) {}
+    constexpr vector3(vector3&&) = default;
+    ~vector3() = default;
+  
+    matrix<T> toMatrix() const { return vessl::matrix<T>(const_cast<T*>(&x), 3, 1); }
+
+    [[nodiscard]] T getMagnitude() const;
+    [[nodiscard]] T getMagnitudeSquared() const { return x*x + y*y + z*z; }
+
+    void setSpherical(T radius, analog_t inclination, analog_t azimuth);
+
+    vector3& operator=(const vector3& other) = default;
+    vector3& operator=(vector3&& other) = default;
+
+    vector3& operator+=(const vector3& other) 
+    {
+      x += other.x;
+      y += other.y;
+      z += other.z;
+      return *this;
+    }
+
+    friend vector3 operator+(vector3 lhs, const vector3& rhs)
+    {
+      lhs += rhs;
+      return lhs;
+    }
+
+    vector3& operator-=(const vector3& other) 
+    {
+      x -= other.x;
+      y -= other.y;
+      z -= other.z;
+      return *this;
+    }
+
+    friend vector3 operator-(vector3 lhs, const vector3& rhs)
+    {
+      lhs -= rhs;
+      return lhs;
+    }
+
+    vector3& operator*=(const T& scalar) 
+    {
+      x *= scalar;
+      y *= scalar;
+      z *= scalar;
+      return *this;
+    }
+
+    friend vector3 operator*(vector3 lhs, const T& rhs)
+    {
+      lhs *= rhs;
+      return lhs;
+    }
+
+    vector3& operator/=(const T& scalar) 
+    {
+      x /= scalar;
+      y /= scalar;
+      z /= scalar;
+      return *this;
+    }
   };
   
   namespace frame
@@ -758,6 +830,52 @@ namespace vessl
 
   template<typename T>
   procStream<T> operator>>(source<T>& in, processor<T>& proc) { return procStream<T>(proc, in); }
+  
+  template<typename T>
+  class transform33 : public processor<vector3<T>>
+  {
+    T data[3 * 3];
+    matrix<T> mtrx;
+  public:
+    transform33() : mtrx(data, 3, 3)
+    {
+      setIdentity();
+    }
+
+    [[nodiscard]] matrix<T> getMatrix() const { return mtrx; }
+  
+    void setIdentity() 
+    {
+      mtrx.clear();
+      for (size_t i = 0; i < 3; i++) {
+        mtrx.set(i,i, 1);
+      }
+    }
+    
+    void setEuler(phase_t pitch, phase_t yaw, phase_t roll);
+
+    template<typename R>
+    void setEuler(R pitchRadians, R yawRadians, R rollRadians)
+    {
+      return setEuler(cast<phase_t>(pitchRadians) / math::twoPi<T>(), 
+        cast<phase_t>(yawRadians) / math::twoPi<T>(), 
+        cast<phase_t>(rollRadians) / math::twoPi<T>());
+    }
+    
+    [[nodiscard]] vector3<T> process(const vector3<T>& input) override
+    {
+      vector3<T> output;
+
+      //output.x = matrix[0][0] * input.x + matrix[0][1] * input.y + matrix[0][2] * input.z;
+      //output.y = matrix[1][0] * input.x + matrix[1][1] * input.y + matrix[1][2] * input.z;
+      //output.z = matrix[2][0] * input.x + matrix[2][1] * input.y + matrix[2][2] * input.z;
+
+      // this might be faster?
+      mtrx.multiply(input.toMatrix(), output.toMatrix());
+
+      return output;
+    }
+  };
 
   template<typename T>
   class ring : array<T>
@@ -2273,6 +2391,160 @@ namespace vessl
   /////////////////////////////////////////////////////////////////////////////////////////////////////
   // implementation
   //
+  
+#ifdef ARM_CORTEX
+  template<>
+  inline void array<float32_t>::copyTo(array dest)
+  {
+    VASSERT(this->getSize() <= dest.getSize(), "Not enough room in destination for this array");
+    arm_copy_f32(data, dest.getData(), this->getSize());
+  }
+
+  template<>
+  inline void array<float32_t>::fill(float value)
+  {
+    arm_fill_f32(value, data, size);  
+  }
+  
+  template<>
+  inline array<float32_t> array<float32_t>::offset(float value, array dest) const
+  {
+    VASSERT(this->getSize() <= dest.getSize(), "Not enough room in destination for this array");
+    arm_offset_f32(data, value, dest.getData(), this->getSize());
+    return dest;
+  }
+  
+  template<>
+  inline array<float32_t> array<float32_t>::add(array other, array dest) const
+  {
+    VASSERT(size == other.size && size <= dest.size, "Arrays are different sizes or dest is not large enough.");
+    arm_add_f32(data, other.data, dest.data, size);
+    return dest;
+  }
+
+  template<>
+  inline array<float32_t> array<float32_t>::subtract(array other, array dest) const
+  {
+    VASSERT(size == other.size && size <= dest.size, "Arrays are different sizes or dest is not large enough.");
+    arm_sub_f32(data, other.data, dest.data, size);
+    return dest;
+  }
+
+  template<>
+  inline array<float32_t> array<float32_t>::scale(float32_t value, array dest) const
+  {
+    VASSERT(size <= dest.size, "Destination array is not large enough");
+    arm_scale_f32(data, value, dest.data, size);
+    return dest;
+  }
+
+  template<>
+  inline array<float32_t> array<float32_t>::multiply(array other, array dest) const
+  {
+    VASSERT(size == other.size && size <= dest.size, "Arrays are different sizes or dest is not large enough.");
+    arm_mult_f32(data, other.data, dest.data, size);
+    return dest;
+  }
+  
+  template<>
+  struct matrixData<float32_t>
+  {
+    arm_matrix_instance_f32 inst;
+    matrixData() { arm_mat_init_f32(&inst, 0, 0, nullptr); };
+    matrixData(float32_t* data, uint32_t r, uint32_t c) { arm_mat_init_f32(&inst, r, c, data); }
+    
+    float32_t* operator*() { return inst.pData; }
+    float32_t* operator*() const { return inst.pData; }
+    [[nodiscard]] uint32_t rows() const { return inst.numRows; }
+    [[nodiscard]] uint32_t cols() const { return inst.numCols; }
+  };
+  
+  template<>
+  inline matrix<float32_t> matrix<float32_t>::add(matrix other, matrix dest) const
+  {
+    VASSERT(rows == other.rows && rows == dest.rows && columns == other.columns && colums == dest.columns, "matrices do not have the same dimentions");
+    arm_mat_add_f32(&data.inst, &other.data.inst, &dest.data.inst);
+    return dest;
+  }
+
+  template<>
+  inline matrix<float32_t> matrix<float32_t>::subtract(matrix other, matrix dest) const
+  {
+    VASSERT(rows == other.rows && rows == dest.rows && columns == other.columns && colums == dest.columns, "matrices do not have the same dimentions");
+    arm_mat_sub_f32(&data.inst, &other.data.inst, &dest.data.inst);
+    return dest;
+  }
+  
+  template<>
+  inline matrix<float32_t> matrix<float32_t>::scale(float32_t value, matrix dest) const
+  {
+    arm_mat_scale_f32(&data.inst, value, &dest.data.inst);
+    return dest;
+  }
+  
+  template<>
+  inline matrix<float32_t> matrix<float32_t>::multiply(matrix other, matrix dest) const
+  {
+    VASSERT(getColumns() == other.getRows(), "Incompatible matrix sizes in operands");
+    VASSERT(dest.getRows() == getRows(), "Incorrect number of rows in destination");
+    VASSERT(dest.getColumns() == other.getColumns(), "Incorrect number of columns in destination");
+    arm_mat_mult_f32(&data.inst, &other.data.inst, &dest.data.inst);
+    return dest;
+  }
+  
+  // @todo can implement when/if I update the version of CMSIS used by OWL
+  // template<>
+  // inline array<float32_t> matrix<float32_t>::multiply(array<float32_t> vector, array<float32_t> dest) const
+  // {
+  //   VASSERT(getColumns() == vector.getSize(), "Incompatible operands");
+  //   VASSERT(dest.getSize() == getRows(), "Incompatible destination size");
+  //   return dest;
+  // }
+  
+  namespace math
+  {
+    template<>
+    inline float32_t sinr(float32_t r) { return arm_sin_f32(r); }
+
+    template<>
+    inline float32_t sqrt(float32_t x)
+    {
+      float out;
+      if (ARM_MATH_SUCCESS == arm_sqrt_f32(x, &out))
+      {
+        return out;
+      }
+      return 0;
+    }
+  }
+  
+  namespace filtering
+  {
+    template<size_t STAGES>
+    template<class CoGen>
+    struct biquad<STAGES>::df2T<float, CoGen> final : cascade<float, 2>
+    {
+      arm_biquad_cascade_df2T_instance_f32 inst;
+          
+      using biquad<STAGES>::cascade<float, 2>::coeff;
+      using biquad<STAGES>::cascade<float, 2>::state;
+      using biquad<STAGES>::cascade<float, 2>::getCoeffSize;
+      using biquad<STAGES>::cascade<float, 2>::getStateSize;
+    
+      static CoGen cg;
+  
+      df2T() { arm_biquad_cascade_df2T_init_f32(&inst, STAGES, coeff.getData(), state.getData()); }
+    
+      size_t getStageCount() const { return STAGES; }
+  
+      void process(const float* source, float* dest, size_t blockSize, const args& args)
+      {
+        cg(coeff.getData(), args.omega(), args.q, args.g);
+        arm_biquad_cascade_df2T_f32(&inst, source, dest, blockSize);
+      }
+    };
+  }
+#endif
 
   template<typename T>
   void processor<T>::process(source<T>& in, sink<T>& out)
@@ -2442,7 +2714,7 @@ namespace vessl
   }
   
   template<typename T>
-  array<T> matrix<T>::multiply(array<T> vector, array<T> dest) const
+  array<T> matrix<T>::multiply(const array<T>& vector, array<T> dest) const
   {
     VASSERT(getColumns() == vector.getSize(), "Incompatible operands");
     VASSERT(dest.getSize() == getRows(), "Incompatible destination size");
@@ -2459,6 +2731,20 @@ namespace vessl
     return dest;
   }
 
+  template <typename T>
+  T vector3<T>::getMagnitude() const
+  {
+    return math::sqrt(x*x + y*y + z*z);
+  }
+
+  template <typename T>
+  void vector3<T>::setSpherical(T radius, analog_t inclination, analog_t azimuth)
+  {
+    x = radius * math::cosr(azimuth) * math::sinr(inclination);
+    y = radius * math::sinr(azimuth) * math::sinr(inclination);
+    z = radius * math::cosr(inclination);
+  }
+
   template<typename T>
   frame::channels<T, 1> frame::channels<T, 1>::toMono() const { return channels(samples[0]); }
 
@@ -2468,7 +2754,58 @@ namespace vessl
     w.write(v);
     return w;
   }
+
+  template <typename T>
+  void transform33<T>::setEuler(phase_t pitch, phase_t yaw, phase_t roll)
+  {
+    T cosa = math::cosz<T>(roll);
+    T sina = math::sinz<T>(roll);
+
+    T cosb = math::cosz<T>(yaw);
+    T sinb = math::sinz<T>(yaw);
+
+    T cosc = math::cosz<T>(pitch);
+    T sinc = math::sinz<T>(pitch);
+
+    mtrx[0][0] = cosa * cosb;
+    mtrx[0][1] = cosa * sinb*sinc - sina * cosc;
+    mtrx[0][2] = cosa * sinb*cosc + sina * sinc;
+
+    mtrx[1][0] = sina * cosb;
+    mtrx[1][1] = sina * sinb*sinc + cosa * cosc;
+    mtrx[1][2] = sina * sinb*cosc - cosa * sinc;
+
+    mtrx[2][0] = -sinb;
+    mtrx[2][1] = cosb * sinc;
+    mtrx[2][2] = cosb * cosc;
+  }
   
+  template <>
+  template <>
+  inline void transform33<analog_t>::setEuler<analog_t>(analog_t pitch, analog_t yaw, analog_t roll)
+  {
+    analog_t cosa = math::cosr(roll);
+    analog_t sina = math::sinr(roll);
+
+    analog_t cosb = math::cosr(yaw);
+    analog_t sinb = math::sinr(yaw);
+
+    analog_t cosc = math::cosr(pitch);
+    analog_t sinc = math::sinr(pitch);
+
+    mtrx[0][0] = cosa * cosb;
+    mtrx[0][1] = cosa * sinb*sinc - sina * cosc;
+    mtrx[0][2] = cosa * sinb*cosc + sina * sinc;
+
+    mtrx[1][0] = sina * cosb;
+    mtrx[1][1] = sina * sinb*sinc + cosa * cosc;
+    mtrx[1][2] = sina * sinb*cosc - cosa * sinc;
+
+    mtrx[2][0] = -sinb;
+    mtrx[2][1] = cosb * sinc;
+    mtrx[2][2] = cosb * cosc;
+  }
+
   template<typename T>
   void ring<T>::write(const T& v)
   {
@@ -3210,158 +3547,4 @@ namespace vessl
     // stmlib returns this, which clips more easily, but is faster.
     //return pre*gain*0.8;
   }
-
-#ifdef ARM_CORTEX
-  template<>
-  inline void array<float32_t>::copyTo(array dest)
-  {
-    VASSERT(this->getSize() <= dest.getSize(), "Not enough room in destination for this array");
-    arm_copy_f32(data, dest.getData(), this->getSize());
-  }
-
-  template<>
-  inline void array<float32_t>::fill(float value)
-  {
-    arm_fill_f32(value, data, size);  
-  }
-  
-  template<>
-  inline array<float32_t> array<float32_t>::offset(float value, array dest) const
-  {
-    VASSERT(this->getSize() <= dest.getSize(), "Not enough room in destination for this array");
-    arm_offset_f32(data, value, dest.getData(), this->getSize());
-    return dest;
-  }
-  
-  template<>
-  inline array<float32_t> array<float32_t>::add(array other, array dest) const
-  {
-    VASSERT(size == other.size && size <= dest.size, "Arrays are different sizes or dest is not large enough.");
-    arm_add_f32(data, other.data, dest.data, size);
-    return dest;
-  }
-
-  template<>
-  inline array<float32_t> array<float32_t>::subtract(array other, array dest) const
-  {
-    VASSERT(size == other.size && size <= dest.size, "Arrays are different sizes or dest is not large enough.");
-    arm_sub_f32(data, other.data, dest.data, size);
-    return dest;
-  }
-
-  template<>
-  inline array<float32_t> array<float32_t>::scale(float32_t value, array dest) const
-  {
-    VASSERT(size <= dest.size, "Destination array is not large enough");
-    arm_scale_f32(data, value, dest.data, size);
-    return dest;
-  }
-
-  template<>
-  inline array<float32_t> array<float32_t>::multiply(array other, array dest) const
-  {
-    VASSERT(size == other.size && size <= dest.size, "Arrays are different sizes or dest is not large enough.");
-    arm_mult_f32(data, other.data, dest.data, size);
-    return dest;
-  }
-  
-  template<>
-  struct matrixData<float32_t>
-  {
-    arm_matrix_instance_f32 inst;
-    matrixData() { arm_mat_init_f32(&inst, 0, 0, nullptr); };
-    matrixData(float32_t* data, uint32_t r, uint32_t c) { arm_mat_init_f32(&inst, r, c, data); }
-    
-    float32_t* operator*() { return inst.pData; }
-    float32_t* operator*() const { return inst.pData; }
-    [[nodiscard]] uint32_t rows() const { return inst.numRows; }
-    [[nodiscard]] uint32_t cols() const { return inst.numCols; }
-  };
-  
-  template<>
-  inline matrix<float32_t> matrix<float32_t>::add(matrix other, matrix dest) const
-  {
-    VASSERT(rows == other.rows && rows == dest.rows && columns == other.columns && colums == dest.columns, "matrices do not have the same dimentions");
-    arm_mat_add_f32(&data.inst, &other.data.inst, &dest.data.inst);
-    return dest;
-  }
-
-  template<>
-  inline matrix<float32_t> matrix<float32_t>::subtract(matrix other, matrix dest) const
-  {
-    VASSERT(rows == other.rows && rows == dest.rows && columns == other.columns && colums == dest.columns, "matrices do not have the same dimentions");
-    arm_mat_sub_f32(&data.inst, &other.data.inst, &dest.data.inst);
-    return dest;
-  }
-  
-  template<>
-  inline matrix<float32_t> matrix<float32_t>::scale(float32_t value, matrix dest) const
-  {
-    arm_mat_scale_f32(&data.inst, value, &dest.data.inst);
-    return dest;
-  }
-  
-  template<>
-  inline matrix<float32_t> matrix<float32_t>::multiply(matrix other, matrix dest) const
-  {
-    VASSERT(getColumns() == other.getRows(), "Incompatible matrix sizes in operands");
-    VASSERT(dest.getRows() == getRows(), "Incorrect number of rows in destination");
-    VASSERT(dest.getColumns() == other.getColumns(), "Incorrect number of columns in destination");
-    arm_mat_mult_f32(&data.inst, &other.data.inst, &dest.data.inst);
-    return dest;
-  }
-  
-  // @todo can implement when/if I update the version of CMSIS used by OWL
-  // template<>
-  // inline array<float32_t> matrix<float32_t>::multiply(array<float32_t> vector, array<float32_t> dest) const
-  // {
-  //   VASSERT(getColumns() == vector.getSize(), "Incompatible operands");
-  //   VASSERT(dest.getSize() == getRows(), "Incompatible destination size");
-  //   return dest;
-  // }
-  
-  namespace math
-  {
-    template<>
-    inline float32_t sinr(float32_t r) { return arm_sin_f32(r); }
-
-    template<>
-    inline float32_t sqrt(float32_t x)
-    {
-      float out;
-      if (ARM_MATH_SUCCESS == arm_sqrt_f32(x, &out))
-      {
-        return out;
-      }
-      return 0;
-    }
-  }
-  
-  namespace filtering
-  {
-    template<size_t STAGES>
-    template<class CoGen>
-    struct biquad<STAGES>::df2T<float, CoGen> final : cascade<float, 2>
-    {
-      arm_biquad_cascade_df2T_instance_f32 inst;
-          
-      using biquad<STAGES>::cascade<float, 2>::coeff;
-      using biquad<STAGES>::cascade<float, 2>::state;
-      using biquad<STAGES>::cascade<float, 2>::getCoeffSize;
-      using biquad<STAGES>::cascade<float, 2>::getStateSize;
-    
-      static CoGen cg;
-  
-      df2T() { arm_biquad_cascade_df2T_init_f32(&inst, STAGES, coeff.getData(), state.getData()); }
-    
-      size_t getStageCount() const { return STAGES; }
-  
-      void process(const float* source, float* dest, size_t blockSize, const args& args)
-      {
-        cg(coeff.getData(), args.omega(), args.q, args.g);
-        arm_biquad_cascade_df2T_f32(&inst, source, dest, blockSize);
-      }
-    };
-  }
-#endif
 }

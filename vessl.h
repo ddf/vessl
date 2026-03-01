@@ -1301,6 +1301,9 @@ namespace vessl
     T lerp(T begin, T end, analog_t t) { return interp<linear, T>(begin, end, t); }
     
     template<typename T>
+    T lerpp(T begin, T end, phase_t t) { return begin + (end-begin)*t/PHASE_MAX; }
+    
+    template<typename T>
     T smooth(T value, T target, analog_t degree = 0.9f) { return value*degree + (1.0 - degree)*target; }
     
     template<>

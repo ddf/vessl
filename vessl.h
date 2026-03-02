@@ -95,9 +95,8 @@ namespace vessl
   template<>
   inline phase_t cast<phase_t, analog_t>(analog_t from)
   {
-    analog_t i;
-    analog_t f = std::modf(from, &i);
-    if (f < 0) f += 1.0f;
+    analog_t f = from < -1.f ? -1.f : from > 1.f ? 1.f : from;
+    if (f < 0) { f += 1.0f; }
     return static_cast<phase_t>(f * 4294967296.0);
   }
   
@@ -674,7 +673,7 @@ namespace vessl
     T cosr(T r) { return std::cos(r); }
     
     template<typename T>
-    T cosz(phase_t z) { return math::cosr(math::twoPi<T>()* cast<T>(z)); }
+    T cosz(phase_t z) { return math::cosr(math::twoPi<T>() * cast<T>(z)); }
 
     template<typename T>
     T sqrt(T x) { return std::sqrt(x); }
@@ -1301,7 +1300,10 @@ namespace vessl
     T lerp(T begin, T end, analog_t t) { return interp<linear, T>(begin, end, t); }
     
     template<typename T>
-    T lerpp(T begin, T end, phase_t t) { return begin + (end-begin)*t/PHASE_MAX; }
+    T lerpp(T begin, T end, phase_t t) { return t == PHASE_ZERO ? begin 
+                                              : t == PHASE_MAX ? end 
+                                              : begin < end ? begin + (end-begin)*t/PHASE_MAX
+                                              : begin - (begin-end)*t/PHASE_MAX; }
     
     template<typename T>
     T smooth(T value, T target, analog_t degree = 0.9f) { return value*degree + (1.0 - degree)*target; }

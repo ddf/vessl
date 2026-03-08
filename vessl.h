@@ -93,15 +93,15 @@ namespace vessl
   
   // phase_t <--> analog_t
   template<>
-  inline phase_t cast<phase_t, analog_t>(analog_t from)
+  constexpr phase_t cast<phase_t, analog_t>(analog_t from)
   {
-    analog_t f = from < -1.f ? -1.f : from > 1.f ? 1.f : from;
+    analog_t f = from < -1.0f ? 1.0f : from > 1.0f ? 1.0f : from;
     if (f < 0) { f += 1.0f; }
     return static_cast<phase_t>(f * 4294967296.0);
   }
   
   template<>
-  inline analog_t cast<analog_t, phase_t>(phase_t from)
+  constexpr analog_t cast<analog_t, phase_t>(phase_t from)
   {
     return static_cast<analog_t>(from) / 4294967296.0f;
   }

@@ -108,10 +108,10 @@ namespace vessl
   
   // phase_t <--> binary_t
   template<>
-  inline binary_t cast<binary_t, phase_t>(phase_t from) { return from > PHASE_HALF; }
+  constexpr binary_t cast<binary_t, phase_t>(phase_t from) { return from > PHASE_HALF; }
   
   template<>
-  inline phase_t cast<phase_t, binary_t>(binary_t from) { return from ? PHASE_MAX : PHASE_ZERO; }
+  constexpr phase_t cast<phase_t, binary_t>(binary_t from) { return from ? PHASE_MAX : PHASE_ZERO; }
   
   template<typename T>
   class source

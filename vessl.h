@@ -330,7 +330,7 @@ namespace vessl
     T* operator[](uint32_t row) { return &getData()[row*getColumns()]; }
     const T* operator[](uint32_t row) const { return &getData()[row*getColumns()]; }
     
-    void clear() { array<T> arr(getData(), getSize()); arr.fill(T(0)); }
+    void clear() { array<T> arr(getData(), getSize()); arr.fill(T(0UL)); }
     T get(size_t row, size_t col) const { return getData()[row*getColumns() + col]; }
     void set(size_t row, size_t col, T value) { getData()[row*getColumns() + col] = value; }
     
@@ -359,7 +359,7 @@ namespace vessl
   {
     T x, y, z;
   
-    constexpr vector3() : x(0), y(0), z(0) {}
+    constexpr vector3() : x(0UL), y(0UL), z(0UL) {}
     constexpr vector3(const vector3&) = default;
     constexpr vector3(T inX, T inY, T inZ) : x(inX), y(inY),  z(inZ) {}
     constexpr vector3(vector3&&) = default;
@@ -506,7 +506,7 @@ namespace vessl
     {
       T samples[2];
 
-      channels() : array<T>(samples, 2) { samples[0] = 0; samples[1] = 0; }
+      channels() : array<T>(samples, 2) { samples[0] =  T(0UL); samples[1] = T(0UL); }
       explicit channels(T m) : array<T>(samples, 2) { samples[0] = m; samples[1] = m; }
       channels(T left, T right) : array<T>(samples, 2) { samples[0] = left, samples[1] = right; }
       channels(const channels& other) : array<T>(samples, 2) { samples[0] = other.samples[0]; samples[1] = other.samples[1]; }

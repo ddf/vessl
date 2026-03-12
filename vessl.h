@@ -2772,17 +2772,21 @@ namespace vessl
     T cosc = math::cosz<T>(pitch);
     T sinc = math::sinz<T>(pitch);
 
-    mtrx[0][0] = cosa * cosb;
-    mtrx[0][1] = cosa * sinb*sinc - sina * cosc;
-    mtrx[0][2] = cosa * sinb*cosc + sina * sinc;
+    T caXsb = cosa*sinb;
+    T saXsb = sina*sinb;
 
-    mtrx[1][0] = sina * cosb;
-    mtrx[1][1] = sina * sinb*sinc + cosa * cosc;
-    mtrx[1][2] = sina * sinb*cosc - cosa * sinc;
+    // row*3 + col
+    data[0] = cosa*cosb;
+    data[1] = caXsb*sinc - sina*cosc;
+    data[2] = caXsb*cosc + sina*sinc;
 
-    mtrx[2][0] = -sinb;
-    mtrx[2][1] = cosb * sinc;
-    mtrx[2][2] = cosb * cosc;
+    data[3] = sina*cosb;
+    data[4] = saXsb*sinc + cosa*cosc;
+    data[5] = saXsb*cosc - cosa*sinc;
+
+    data[6] = -sinb;
+    data[7] = cosb*sinc;
+    data[8] = cosb*cosc;
   }
   
   template <>

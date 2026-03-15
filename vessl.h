@@ -29,6 +29,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include "vessl_q32.h"
 
 // When built for ARM Cortex-M processor series,
 // we provide template specializations that use the optimized CMSIS library:
@@ -76,16 +77,17 @@ namespace vessl
 {
   using char_t    = char;
   using size_t    = uint64_t;
-  // [0,1) phase represented using the full range of uint32 (essentially fixed-point)
-  using phase_t   = uint32_t;
   using binary_t  = bool;
-  using digital_t = int64_t;
+  using digital_t = int32_t;
   using analog_t  = float;
-  
-  static constexpr phase_t PHASE_MAX  = UINT32_MAX;
-  static constexpr phase_t PHASE_HALF = ((phase_t)INT32_MAX);
-  static constexpr phase_t PHASE_ZERO = ((phase_t)0u);
-  
+  using phase_t   = q32;
+
+  static constexpr phase_t PHASE_360  = q32::max();
+  static constexpr phase_t PHASE_180  = q32::mid();
+  static constexpr phase_t PHASE_90   = q32(PHASE_180.v_>>1);
+  static constexpr phase_t PHASE_270  = PHASE_180 + PHASE_90;
+  static constexpr phase_t PHASE_ZERO = q32::min();
+
   // we use this in place of static_cast throughout the library for non-pointer types
   // so that we can specialize conversions between some of our value types (e.g. phase_t <--> analog_t)
   template<typename T, typename F>
@@ -95,23 +97,40 @@ namespace vessl
   template<>
   constexpr phase_t cast<phase_t, analog_t>(analog_t from)
   {
-    analog_t f = from < -1.0f ? 1.0f : from > 1.0f ? 1.0f : from;
-    if (f < 0) { f += 1.0f; }
-    return static_cast<phase_t>(f * 4294967296.0);
+    return phase_t(from);
   }
   
   template<>
   constexpr analog_t cast<analog_t, phase_t>(phase_t from)
   {
-    return static_cast<analog_t>(from) / 4294967296.0f;
+    return static_cast<analog_t>(from);
+  }
+
+  // phase t <--> digital_t
+  template<>
+  constexpr digital_t cast<digital_t, phase_t>(phase_t from)
+  {
+    return from > PHASE_180 ? 1 : 0;
+  }
+
+  template<>
+  constexpr phase_t cast<phase_t, digital_t>(digital_t from)
+  {
+    return from <= 0 ? PHASE_ZERO : PHASE_360;
+  }
+
+  template<>
+  constexpr phase_t cast<phase_t, size_t>(size_t from)
+  {
+    return phase_t::sat(from);
   }
   
   // phase_t <--> binary_t
   template<>
-  constexpr binary_t cast<binary_t, phase_t>(phase_t from) { return from > PHASE_HALF; }
+  constexpr binary_t cast<binary_t, phase_t>(phase_t from) { return from > PHASE_180; }
   
   template<>
-  constexpr phase_t cast<phase_t, binary_t>(binary_t from) { return from ? PHASE_MAX : PHASE_ZERO; }
+  constexpr phase_t cast<phase_t, binary_t>(binary_t from) { return from ? PHASE_360 : PHASE_ZERO; }
   
   template<typename T>
   class source
@@ -330,7 +349,7 @@ namespace vessl
     T* operator[](uint32_t row) { return &getData()[row*getColumns()]; }
     const T* operator[](uint32_t row) const { return &getData()[row*getColumns()]; }
     
-    void clear() { array<T> arr(getData(), getSize()); arr.fill(T(0UL)); }
+    void clear() { array<T> arr(getData(), getSize()); arr.fill(T(0LL)); }
     T get(size_t row, size_t col) const { return getData()[row*getColumns() + col]; }
     void set(size_t row, size_t col, T value) { getData()[row*getColumns() + col] = value; }
     
@@ -359,7 +378,7 @@ namespace vessl
   {
     T x, y, z;
   
-    constexpr vector3() : x(0UL), y(0UL), z(0UL) {}
+    constexpr vector3() : x(0LL), y(0LL), z(0LL) {}
     constexpr vector3(const vector3&) = default;
     constexpr vector3(T inX, T inY, T inZ) : x(inX), y(inY),  z(inZ) {}
     constexpr vector3(vector3&&) = default;
@@ -506,7 +525,7 @@ namespace vessl
     {
       T samples[2];
 
-      channels() : array<T>(samples, 2) { samples[0] =  T(0UL); samples[1] = T(0UL); }
+      channels() : array<T>(samples, 2) { samples[0] =  T(0LL); samples[1] = T(0LL); }
       explicit channels(T m) : array<T>(samples, 2) { samples[0] = m; samples[1] = m; }
       channels(T left, T right) : array<T>(samples, 2) { samples[0] = left, samples[1] = right; }
       channels(const channels& other) : array<T>(samples, 2) { samples[0] = other.samples[0]; samples[1] = other.samples[1]; }
@@ -964,7 +983,7 @@ namespace vessl
     {
       switch (description.type)
       {
-        case valuetype::none: return T(0);
+        case valuetype::none: return T(0ul);
         case valuetype::binary: return cast<T>(*static_cast<binary_t*>(pdata));
         case valuetype::digital: return cast<T>(*static_cast<digital_t*>(pdata));
         case valuetype::analog: return cast<T>(*static_cast<analog_t*>(pdata));
@@ -1301,9 +1320,9 @@ namespace vessl
     
     template<typename T>
     T lerpp(T begin, T end, phase_t t) { return t == PHASE_ZERO ? begin 
-                                              : t == PHASE_MAX ? end 
-                                              : begin < end ? begin + (end-begin)*t/PHASE_MAX
-                                              : begin - (begin-end)*t/PHASE_MAX; }
+                                              : t == PHASE_360 ? end 
+                                              : begin < end ? begin + (end-begin)*t.v_/PHASE_360.v_
+                                              : begin - (begin-end)*t.v_/PHASE_360.v_; }
     
     template<typename T>
     T smooth(T value, T target, analog_t degree = 0.9f) { return value*degree + (1.0 - degree)*target; }
@@ -1644,7 +1663,7 @@ namespace vessl
     struct square final : waveform<T>
     {
       phase_t pulseWidth;
-      square() : pulseWidth(PHASE_HALF) {}
+      square() : pulseWidth(PHASE_180) {}
       explicit square(phase_t inPulseWidth) : pulseWidth(inPulseWidth) {}
       T evaluate(phase_t phase) const override { return phase < pulseWidth ? 1 : -1; }
     };
@@ -1654,7 +1673,7 @@ namespace vessl
     struct clock final : waveform<T>
     {
       phase_t pulseWidth;
-      clock() : pulseWidth(PHASE_HALF) {}
+      clock() : pulseWidth(PHASE_180) {}
       explicit clock(phase_t inPulseWidth) : pulseWidth(inPulseWidth) {}
       T evaluate(phase_t phase) const override { return phase < pulseWidth ? 1 : 0; }
     };
@@ -3276,7 +3295,7 @@ namespace vessl
   {
     typename W::SampleType val = waveform.evaluate(phase + params.pm.value);
     analog_t f = params.fHz.value * math::exp2(params.fmExp.value) + params.fmLin.value;
-    phase = phase + static_cast<phase_t>(f * dt);
+    phase = phase + vessl::cast<phase_t>(f*dt);
     return val;
   }
 
@@ -3311,7 +3330,7 @@ namespace vessl
   T delayline<T>::evaluate(phase_t phase) const
   {
     analog_t fSize = cast<analog_t>(getSize());
-    analog_t sampleDelay = cast<analog_t>(PHASE_MAX - phase) * fSize;
+    analog_t sampleDelay = cast<analog_t>(PHASE_360 - phase) * fSize;
     return read<interpolation::linear<T>>(sampleDelay);
   }
 

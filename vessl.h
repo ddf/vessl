@@ -29,7 +29,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
-#include "vessl_q32.h"
+#include "vessl_qmath.h"
 
 // When built for ARM Cortex-M processor series,
 // we provide template specializations that use the optimized CMSIS library:
@@ -78,15 +78,15 @@ namespace vessl
   using char_t    = char;
   using size_t    = uint64_t;
   using binary_t  = bool;
-  using digital_t = int32_t;
+  using digital_t = int64_t;
   using analog_t  = float;
-  using phase_t   = q32;
+  using phase_t   = q31;
 
-  static constexpr phase_t PHASE_360  = q32::max();
-  static constexpr phase_t PHASE_180  = q32::mid();
-  static constexpr phase_t PHASE_90   = q32(PHASE_180.v_>>1);
+  static constexpr phase_t PHASE_360  = q31::max();
+  static constexpr phase_t PHASE_180  = q31(0x3fffffffL);
+  static constexpr phase_t PHASE_90   = q31(PHASE_180.v_>>1);
   static constexpr phase_t PHASE_270  = PHASE_180 + PHASE_90;
-  static constexpr phase_t PHASE_ZERO = q32::min();
+  static constexpr phase_t PHASE_ZERO = q31::mid();
 
   // we use this in place of static_cast throughout the library for non-pointer types
   // so that we can specialize conversions between some of our value types (e.g. phase_t <--> analog_t)
@@ -626,8 +626,14 @@ namespace vessl
     template<typename T>
     constexpr T pi() { return cast<T>(3.1415926535897932385); }
 
+    template<>
+    inline constexpr phase_t pi<phase_t>() { return PHASE_180; }
+
     template<typename T>
     constexpr T twoPi() { return pi<T>() * 2; }
+
+    template<>
+    inline constexpr phase_t twoPi() { return PHASE_360; }
 
     template<typename T>
     T abs(T val) { return ::abs(val); }
@@ -682,17 +688,41 @@ namespace vessl
       return result;
     }
 
-    template<typename T>
-    T sinr(T r) { return std::sin(r); }
-    
-    template<typename T>
-    T sinz(phase_t z) { return math::sinr(math::twoPi<T>() * cast<T>(z)); }
+    template<typename T, typename R = T>
+    T sin(R r) { return std::sin(r); }
 
-    template<typename T>
-    T cosr(T r) { return std::cos(r); }
+    template<typename T, typename R = T>
+    T cos(R r) { return std::cos(r); }
     
-    template<typename T>
-    T cosz(phase_t z) { return math::cosr(math::twoPi<T>() * cast<T>(z)); }
+    template<>
+    inline analog_t sin<analog_t, phase_t>(phase_t z) 
+    { 
+      return math::sin<analog_t>(math::twoPi<analog_t>() * cast<analog_t>(z)); 
+    }
+
+    template<>
+    inline analog_t cos<analog_t, phase_t>(phase_t z) 
+    { 
+      return math::cos<analog_t>(math::twoPi<analog_t>() * cast<analog_t>(z)); 
+    }
+
+    template<>
+    inline q31 sin<q31, analog_t>(analog_t radians) { return q31(math::sin<analog_t>(radians)); }
+
+    template<>
+    inline q31 cos<q31, analog_t>(analog_t radians) { return q31(math::cos<analog_t>(radians)); }
+
+    template<>
+    inline q31 sin<q31, phase_t>(phase_t phase) 
+    { 
+      return q31(math::sin<analog_t>(math::twoPi<analog_t>()*cast<analog_t>(phase)));
+    }
+
+    template<>
+    inline q31 cos<q31, phase_t>(phase_t phase) 
+    { 
+      return q31(math::cos<analog_t>(math::twoPi<analog_t>()*cast<analog_t>(phase))); 
+    }
 
     template<typename T>
     T sqrt(T x) { return std::sqrt(x); }
@@ -716,9 +746,12 @@ namespace vessl
     // @todo use modf here
     template<typename T>
     T wrap01(T val) { return wrap(val, T(0), T(1)); }
+
+    template<>
+    inline phase_t wrap01(phase_t val) { return val < PHASE_ZERO ? val + PHASE_360 : val; }
     
     template<>
-    inline float wrap01(float v) { float i; float f = mod(v, &i); return f < 0 ? 1.0f - f : f; }
+    inline analog_t wrap01<analog_t>(float v) { float i; float f = mod(v, &i); return f < 0 ? f + 1.0f : f; }
 
     template<typename T>
     binary_t isNan(T n) { return isnan(n); }
@@ -866,7 +899,7 @@ namespace vessl
     {
       mtrx.clear();
       for (size_t i = 0; i < 3; i++) {
-        mtrx.set(i,i, 1);
+        mtrx.set(i,i, T(1LL));
       }
     }
     
@@ -983,7 +1016,7 @@ namespace vessl
     {
       switch (description.type)
       {
-        case valuetype::none: return T(0ul);
+        case valuetype::none: return T(0LL);
         case valuetype::binary: return cast<T>(*static_cast<binary_t*>(pdata));
         case valuetype::digital: return cast<T>(*static_cast<digital_t*>(pdata));
         case valuetype::analog: return cast<T>(*static_cast<analog_t*>(pdata));
@@ -1312,17 +1345,29 @@ namespace vessl
     T interp(T begin, T end, analog_t t)
     {
       static E ease;
-      return (end-begin) * ease(t) + begin;
+      return (end-begin) * ease(math::constrain(t, 0.f, 1.f)) + begin;
     }
 
     template<typename T>
     T lerp(T begin, T end, analog_t t) { return interp<linear, T>(begin, end, t); }
     
     template<typename T>
-    T lerpp(T begin, T end, phase_t t) { return t == PHASE_ZERO ? begin 
-                                              : t == PHASE_360 ? end 
-                                              : begin < end ? begin + (end-begin)*t.v_/PHASE_360.v_
-                                              : begin - (begin-end)*t.v_/PHASE_360.v_; }
+    T lerpp(T begin, T end, phase_t t) 
+    { 
+      return t <= PHASE_ZERO ? begin 
+           : t >= PHASE_360 ? end 
+           : begin < end ? begin + (end-begin)*t.v_/PHASE_360.v_
+           : begin - (begin-end)*t.v_/PHASE_360.v_; 
+    }
+
+
+    template<>
+    inline q31 lerpp<q31>(q31 begin, q31 end, phase_t t) 
+    { 
+      return t <= PHASE_ZERO ? begin 
+           : t >= PHASE_360 ? end 
+           : begin + (end-begin)*t;
+    }
     
     template<typename T>
     T smooth(T value, T target, analog_t degree = 0.9f) { return value*degree + (1.0 - degree)*target; }
@@ -1656,7 +1701,7 @@ namespace vessl
     struct sine final : waveform<T>
     {
       // default implementation assumes default parameter type (floating point)
-      T evaluate(phase_t phase) const override { return math::sinz<T>(phase); }
+      T evaluate(phase_t phase) const override { return math::sin<T>(phase); }
     };
 
     template<typename T = analog_t>
@@ -2726,7 +2771,7 @@ namespace vessl
     {
       for(size_t j = 0; j < other.getColumns(); j++)
       {
-        T accum = 0;
+        T accum = T(0LL);
         for(size_t k = 0; k < other.getRows(); k++)
         {
           accum += get(i, k) * other.get(k, j);
@@ -2764,9 +2809,9 @@ namespace vessl
   template <typename T>
   void vector3<T>::setSpherical(T radius, analog_t inclination, analog_t azimuth)
   {
-    x = radius * math::cosr(azimuth) * math::sinr(inclination);
-    y = radius * math::sinr(azimuth) * math::sinr(inclination);
-    z = radius * math::cosr(inclination);
+    x = radius * math::cos<T>(azimuth) * math::sin<T>(inclination);
+    y = radius * math::sin<T>(azimuth) * math::sin<T>(inclination);
+    z = radius * math::cos<T>(inclination);
   }
 
   template<typename T>
@@ -2782,14 +2827,14 @@ namespace vessl
   template <typename T>
   void transform33<T>::setEuler(phase_t pitch, phase_t yaw, phase_t roll)
   {
-    T cosa = math::cosz<T>(roll);
-    T sina = math::sinz<T>(roll);
+    T cosa = math::cos<T>(roll);
+    T sina = math::sin<T>(roll);
 
-    T cosb = math::cosz<T>(yaw);
-    T sinb = math::sinz<T>(yaw);
+    T cosb = math::cos<T>(yaw);
+    T sinb = math::sin<T>(yaw);
 
-    T cosc = math::cosz<T>(pitch);
-    T sinc = math::sinz<T>(pitch);
+    T cosc = math::cos<T>(pitch);
+    T sinc = math::sin<T>(pitch);
 
     T caXsb = cosa*sinb;
     T saXsb = sina*sinb;
@@ -2812,14 +2857,14 @@ namespace vessl
   template <>
   inline void transform33<analog_t>::setEuler<analog_t>(analog_t pitch, analog_t yaw, analog_t roll)
   {
-    analog_t cosa = math::cosr(roll);
-    analog_t sina = math::sinr(roll);
+    analog_t cosa = math::cos<analog_t>(roll);
+    analog_t sina = math::sin<analog_t>(roll);
 
-    analog_t cosb = math::cosr(yaw);
-    analog_t sinb = math::sinr(yaw);
+    analog_t cosb = math::cos<analog_t>(yaw);
+    analog_t sinb = math::sin<analog_t>(yaw);
 
-    analog_t cosc = math::cosr(pitch);
-    analog_t sinc = math::sinr(pitch);
+    analog_t cosc = math::cos<analog_t>(pitch);
+    analog_t sinc = math::sin<analog_t>(pitch);
 
     mtrx[0][0] = cosa * cosb;
     mtrx[0][1] = cosa * sinb*sinc - sina * cosc;

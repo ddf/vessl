@@ -19,18 +19,13 @@ namespace vessl
     constexpr q31& operator=(const analog_t& x) 
     { 
         analog_t f = x < -1.0f ? -1.0f : x > 1.0f ? 1.0f : x;
-        v_ = f * 2147483648.0f;
+        v_ = static_cast<int32_t>(f * 2147483648.0f);
         return *this;
     }
 
-    constexpr operator uint64_t() const { return v_; }
-
     explicit constexpr operator analog_t() const 
     {
-      return v_ == INT32_MAX ? 1.0f : 
-        v_ == 0 ? 0.f : 
-        v_ == INT32_MIN ? -1.f : 
-        static_cast<analog_t>(v_) / 2147483648.0f; 
+      return static_cast<analog_t>(v_) / 2147483648.0f; 
     }
 
     // prefix increment
@@ -42,16 +37,38 @@ namespace vessl
     // postfix decrement
     q31 operator--(int) { q31 p = *this; operator--(); return p; }
 
-    constexpr q31& operator+=(const q31& rhs) { v_ += rhs.v_; return *this; }
+    constexpr q31& operator+=(const q31& rhs) 
+    { 
+      v_ = sat((int64_t)v_ + (int64_t)rhs.v_).v_;
+      return *this; 
+    }
     friend constexpr q31 operator+(q31 lhs, const q31& rhs) { lhs += rhs; return lhs; }
 
+    // adds this and rhs, allowing the value to wrap within our min/max range.
+    // useful when using q31 as phase, as we do throughout the library
+    q31& spill(const q31& rhs)
+    {
+      int64_t s = (int64_t)v_ + (int64_t)rhs.v_;
+      v_ = s > INT32_MAX ? (int32_t)(s - INT32_MAX) : s < INT32_MIN ? (int32_t)(s + INT32_MAX) : s;
+      return *this;
+    }
+
+    static constexpr q31 spill(q31 lhs, const q31& rhs)
+    {
+      return lhs.spill(rhs);
+    }
+
     q31& operator-() { v_ = (v_ == INT32_MIN ? INT32_MAX : INT32_MAX - v_); return *this; }
-    q31& operator-=(const q31& rhs) { v_ -= rhs.v_; return *this; }
+    q31& operator-=(const q31& rhs) 
+    {
+      v_ = sat((int64_t)v_ - (int64_t)rhs.v_).v_; 
+      return *this; 
+    }
     friend q31 operator-(q31 lhs, const q31& rhs) { lhs -= rhs; return lhs; }
 
     q31& operator*=(const q31& rhs) 
     { 
-      *this = sat(((uint64_t)v_ * (uint64_t)rhs.v_)>>31);
+      v_ = sat(((int64_t)v_ * (int64_t)rhs.v_)>>31).v_;
       return *this; 
     }
     friend q31 operator*(q31 lhs, const q31& rhs) { lhs *= rhs; return lhs; }
@@ -73,8 +90,8 @@ namespace vessl
 
     q31& operator/=(const q31& rhs) 
     { 
-      int64_t n = v_; n <<= 31;
-      *this = rhs.v_ == 0u ? mid() : sat(n / rhs.v_); 
+      int64_t n = (int64_t)v_ << 31;
+      v_ = (rhs.v_ == (int32_t)0u ? mid() : sat(n / rhs.v_)).v_; 
       return *this; 
     }
     friend q31 operator/(q31 lhs, const q31& rhs) { lhs /= rhs; return lhs; }
@@ -89,6 +106,7 @@ namespace vessl
     static constexpr q31 max() { return q31(INT32_MAX); }
     static constexpr q31 mid() { return q31(); }
     static constexpr q31 min() { return q31(INT32_MIN); }
-    static constexpr q31 sat(int64_t v) { return v > INT32_MAX ? max() : v < INT32_MIN ? min() : q31((int32_t)(v)); }
+    static constexpr q31 sat(int64_t v) { return v > INT32_MAX ? max() : v < INT32_MIN ? min() : q31((int32_t)v); }
+    static constexpr q31 recip(const analog_t a) { return a == 0 ? mid() : sat((int64_t)INT32_MAX / a); }
   };
 }

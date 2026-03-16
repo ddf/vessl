@@ -748,10 +748,10 @@ namespace vessl
     T wrap01(T val) { return wrap(val, T(0), T(1)); }
 
     template<>
-    inline phase_t wrap01(phase_t val) { return val < PHASE_ZERO ? val + PHASE_360 : val; }
+    inline phase_t wrap01<phase_t>(phase_t val) { return val < PHASE_ZERO ? val + PHASE_360 : val; }
     
     template<>
-    inline analog_t wrap01<analog_t>(float v) { float i; float f = mod(v, &i); return f < 0 ? f + 1.0f : f; }
+    inline analog_t wrap01<analog_t>(analog_t v) { analog_t i; analog_t f = mod(v, &i); return f < 0 ? f + 1.0f : f; }
 
     template<typename T>
     binary_t isNan(T n) { return isnan(n); }

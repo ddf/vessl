@@ -1705,6 +1705,12 @@ namespace vessl
     };
 
     template<typename T = analog_t>
+    struct cosi final : waveform<T>
+    {
+      T evaluate(phase_t phase) const override { return math::cos<T>(phase); }
+    };
+
+    template<typename T = analog_t>
     struct square final : waveform<T>
     {
       phase_t pulseWidth;
@@ -2074,14 +2080,14 @@ namespace vessl
   public:
     using T = typename W::SampleType;
     
-    oscil() : unitGenerator<T>(), phase(0), dt(0) { params.fHz.value = 440.0; }
+    oscil() : unitGenerator<T>(), phase(PHASE_ZERO), dt(PHASE_ZERO) { params.fHz.value = 440.0; }
 
     template<typename... Ts>
     explicit oscil(analog_t sampleRate, analog_t freqInHz, Ts... wargs)
     : unitGenerator<T>(), waveform(wargs...), phase(PHASE_ZERO), dt(cast<phase_t>(1.0f/sampleRate))
     { params.fHz.value = freqInHz; }
     
-    void setSampleRate(float sampleRate) override { dt = cast<phase_t>(1.0f / sampleRate);}
+    void setSampleRate(float sampleRate) override { dt = phase_t::recip(sampleRate); }
 
     W waveform;
     
@@ -2099,6 +2105,7 @@ namespace vessl
     T generate() override;
 
     [[nodiscard]] phase_t getPhase() const { return phase; }
+    [[nodiscard]] phase_t getInc() const { return dt; }
     void reset() { phase = PHASE_ZERO; }
     
   protected:
@@ -3338,9 +3345,9 @@ namespace vessl
   template<class W>
   typename W::SampleType oscil<W>::generate()
   {
-    typename W::SampleType val = waveform.evaluate(phase + params.pm.value);
+    typename W::SampleType val = waveform.evaluate(phase.mod(params.pm.value));
     analog_t f = params.fHz.value * math::exp2(params.fmExp.value) + params.fmLin.value;
-    phase = phase + vessl::cast<phase_t>(f*dt);
+    phase.accum(dt.scaled(f));
     return val;
   }
 

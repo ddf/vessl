@@ -44,18 +44,16 @@ namespace vessl
     }
     friend constexpr q31 operator+(q31 lhs, const q31& rhs) { lhs += rhs; return lhs; }
 
-    // adds this and rhs, allowing the value to wrap within our min/max range.
-    // useful when using q31 as phase, as we do throughout the library
-    q31& spill(const q31& rhs)
+    q31& accum(const q31& inc)
     {
-      int64_t s = (int64_t)v_ + (int64_t)rhs.v_;
+      int64_t s = (int64_t)v_ + (int64_t)inc.v_;
       v_ = s > INT32_MAX ? (int32_t)(s - INT32_MAX) : s < INT32_MIN ? (int32_t)(s + INT32_MAX) : s;
       return *this;
     }
 
-    static constexpr q31 spill(q31 lhs, const q31& rhs)
+    q31 mod(const q31& amt)
     {
-      return lhs.spill(rhs);
+      return q31(*this).accum(amt);
     }
 
     q31& operator-() { v_ = (v_ == INT32_MIN ? INT32_MAX : INT32_MAX - v_); return *this; }
@@ -85,7 +83,12 @@ namespace vessl
 
     q31 scaled(int32_t factor) const
     {
-      return q31(v_* factor);
+      return sat(v_* factor);
+    }
+
+    q31 scaled(analog_t factor) const
+    {
+      return sat(v_ * factor);
     }
 
     q31& operator/=(const q31& rhs) 

@@ -1,11 +1,39 @@
+/*
+MIT License
+
+Copyright (c) 2024 Vaclav Mach (Bastl Instruments)
+Copyright (c) 2024 Marek Mach (Bastl Instruments)
+Copyright (c) 2026 Damien Quartz
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+*/
+
 #pragma once
+
 #include <cstdint>
 
+// Fixed-point types in struct form based on the qmath types in Bastl Instrument's Kastle2 framework.
 namespace vessl
 {
   using analog_t = float;
-
-  // 32-bit fixed-point representation of [-1,1]
+  
+  // 32-bit fixed-point type
   struct q31
   {
     int32_t v_;
@@ -44,18 +72,6 @@ namespace vessl
     }
     friend constexpr q31 operator+(q31 lhs, const q31& rhs) { lhs += rhs; return lhs; }
 
-    q31& accum(const q31& inc)
-    {
-      int64_t s = (int64_t)v_ + (int64_t)inc.v_;
-      v_ = s > INT32_MAX ? (int32_t)(s - INT32_MAX) : s < INT32_MIN ? (int32_t)(s + INT32_MAX) : s;
-      return *this;
-    }
-
-    q31 mod(const q31& amt)
-    {
-      return q31(*this).accum(amt);
-    }
-
     q31& operator-() { v_ = (v_ == INT32_MIN ? INT32_MAX : INT32_MAX - v_); return *this; }
     q31& operator-=(const q31& rhs) 
     {
@@ -73,12 +89,12 @@ namespace vessl
 
     friend analog_t operator*(const analog_t& lhs, const q31& rhs)
     {
-      return lhs * rhs.operator vessl::analog_t();
+      return lhs * rhs.operator analog_t();
     }
 
     friend analog_t operator*(const q31& lhs, const analog_t& rhs)
     {
-      return lhs.operator vessl::analog_t() * rhs;
+      return lhs.operator analog_t() * rhs;
     }
 
     q31 scaled(int32_t factor) const
@@ -107,6 +123,7 @@ namespace vessl
     friend constexpr bool operator<=(const q31& lhs, const q31& rhs) { return lhs.v_ <= rhs.v_; }
 
     static constexpr q31 max() { return q31(INT32_MAX); }
+    static constexpr q31 half() { return q31(0x3fffffffL); }
     static constexpr q31 mid() { return q31(); }
     static constexpr q31 min() { return q31(INT32_MIN); }
     static constexpr q31 sat(int64_t v) { return v > INT32_MAX ? max() : v < INT32_MIN ? min() : q31((int32_t)v); }

@@ -29,7 +29,6 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
-#include "vessl_qmath.h"
 
 // When built for ARM Cortex-M processor series,
 // we provide template specializations that use the optimized CMSIS library:
@@ -80,57 +79,56 @@ namespace vessl
   using binary_t  = bool;
   using digital_t = int64_t;
   using analog_t  = float;
-  using phase_t   = q31;
+  using phase_t   = uint32_t;
 
-  static constexpr phase_t PHASE_360  = q31::max();
-  static constexpr phase_t PHASE_180  = q31(0x3fffffffL);
-  static constexpr phase_t PHASE_90   = q31(PHASE_180.v_>>1);
+  static constexpr phase_t PHASE_360  = UINT32_MAX;
+  static constexpr phase_t PHASE_180  = UINT32_MAX >> 1;
+  static constexpr phase_t PHASE_90   = PHASE_180 >> 1;
   static constexpr phase_t PHASE_270  = PHASE_180 + PHASE_90;
-  static constexpr phase_t PHASE_ZERO = q31::mid();
+  static constexpr phase_t PHASE_ZERO = 0UL;
 
   // we use this in place of static_cast throughout the library for non-pointer types
   // so that we can specialize conversions between some of our value types (e.g. phase_t <--> analog_t)
   template<typename T, typename F>
-  constexpr T cast(F from) { return static_cast<T>(from); }
-  
-  // phase_t <--> analog_t
-  template<>
-  constexpr phase_t cast<phase_t, analog_t>(analog_t from)
-  {
-    return phase_t(from);
-  }
-  
-  template<>
-  constexpr analog_t cast<analog_t, phase_t>(phase_t from)
-  {
-    return static_cast<analog_t>(from);
-  }
+  constexpr T cast(const F& from) { return static_cast<T>(from); }
 
-  // phase t <--> digital_t
+  // phase t <--> digital_t (@todo convert to degrees?)
   template<>
-  constexpr digital_t cast<digital_t, phase_t>(phase_t from)
+  constexpr digital_t cast<digital_t, phase_t>(const phase_t& from)
   {
     return from > PHASE_180 ? 1 : 0;
   }
 
   template<>
-  constexpr phase_t cast<phase_t, digital_t>(digital_t from)
+  constexpr phase_t cast<phase_t, digital_t>(const digital_t& from)
   {
     return from <= 0 ? PHASE_ZERO : PHASE_360;
   }
 
   template<>
-  constexpr phase_t cast<phase_t, size_t>(size_t from)
+  constexpr analog_t cast<analog_t, phase_t>(const phase_t& from)
   {
-    return phase_t::sat(from);
+    return static_cast<analog_t>(from) / 4294967295.0;
+  }
+
+  template<>
+  constexpr phase_t cast<phase_t, analog_t>(const analog_t& from)
+  {
+    return static_cast<phase_t>(from * 4294967295.0);
+  }
+
+  template<>
+  constexpr phase_t cast<phase_t, size_t>(const size_t& from)
+  {
+    return from % PHASE_360;
   }
   
   // phase_t <--> binary_t
   template<>
-  constexpr binary_t cast<binary_t, phase_t>(phase_t from) { return from > PHASE_180; }
+  constexpr binary_t cast<binary_t, phase_t>(const phase_t& from) { return from > PHASE_180; }
   
   template<>
-  constexpr phase_t cast<phase_t, binary_t>(binary_t from) { return from ? PHASE_360 : PHASE_ZERO; }
+  constexpr phase_t cast<phase_t, binary_t>(const binary_t& from) { return from ? PHASE_360 : PHASE_ZERO; }
   
   template<typename T>
   class source
@@ -636,7 +634,7 @@ namespace vessl
     inline constexpr phase_t twoPi() { return PHASE_360; }
 
     template<typename T>
-    T abs(T val) { return ::abs(val); }
+    T abs(const T& val) { return ::abs(val); }
     
     template<typename T>
     T constrain(T val, T low, T high) { return val < low ? low : val > high ? high : val; }
@@ -706,24 +704,6 @@ namespace vessl
       return math::cos<analog_t>(math::twoPi<analog_t>() * cast<analog_t>(z)); 
     }
 
-    template<>
-    inline q31 sin<q31, analog_t>(analog_t radians) { return q31(math::sin<analog_t>(radians)); }
-
-    template<>
-    inline q31 cos<q31, analog_t>(analog_t radians) { return q31(math::cos<analog_t>(radians)); }
-
-    template<>
-    inline q31 sin<q31, phase_t>(phase_t phase) 
-    { 
-      return q31(math::sin<analog_t>(math::twoPi<analog_t>()*cast<analog_t>(phase)));
-    }
-
-    template<>
-    inline q31 cos<q31, phase_t>(phase_t phase) 
-    { 
-      return q31(math::cos<analog_t>(math::twoPi<analog_t>()*cast<analog_t>(phase))); 
-    }
-
     template<typename T>
     T sqrt(T x) { return std::sqrt(x); }
     
@@ -748,7 +728,7 @@ namespace vessl
     T wrap01(T val) { return wrap(val, T(0), T(1)); }
 
     template<>
-    inline phase_t wrap01<phase_t>(phase_t val) { return val < PHASE_ZERO ? val + PHASE_360 : val; }
+    inline phase_t wrap01<phase_t>(phase_t val) { return val; }
     
     template<>
     inline analog_t wrap01<analog_t>(analog_t v) { analog_t i; analog_t f = mod(v, &i); return f < 0 ? f + 1.0f : f; }
@@ -1354,19 +1334,10 @@ namespace vessl
     template<typename T>
     T lerpp(T begin, T end, phase_t t) 
     { 
-      return t <= PHASE_ZERO ? begin 
-           : t >= PHASE_360 ? end 
-           : begin < end ? begin + (end-begin)*t.v_/PHASE_360.v_
-           : begin - (begin-end)*t.v_/PHASE_360.v_; 
-    }
-
-
-    template<>
-    inline q31 lerpp<q31>(q31 begin, q31 end, phase_t t) 
-    { 
-      return t <= PHASE_ZERO ? begin 
-           : t >= PHASE_360 ? end 
-           : begin + (end-begin)*t;
+      return t == PHASE_ZERO ? begin 
+           : t == PHASE_360 ? end 
+           : begin < end ? begin + (end-begin)*t/PHASE_360
+           : begin - (begin-end)*t/PHASE_360; 
     }
     
     template<typename T>
@@ -2087,7 +2058,7 @@ namespace vessl
     : unitGenerator<T>(), waveform(wargs...), phase(PHASE_ZERO), dt(cast<phase_t>(1.0f/sampleRate))
     { params.fHz.value = freqInHz; }
     
-    void setSampleRate(float sampleRate) override { dt = phase_t::recip(sampleRate); }
+    void setSampleRate(float sampleRate) override { dt = cast<phase_t>(1.0f/sampleRate); }
 
     W waveform;
     
@@ -2463,10 +2434,16 @@ namespace vessl
       param<T> peak;
     } params;
   };
+}
   
-  /////////////////////////////////////////////////////////////////////////////////////////////////////
-  // implementation
-  //
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+// implementation
+//
+
+#include "vessl_qmath.inl"
+
+namespace vessl
+{
   
 #ifdef ARM_CORTEX
   template<>
@@ -3345,9 +3322,9 @@ namespace vessl
   template<class W>
   typename W::SampleType oscil<W>::generate()
   {
-    typename W::SampleType val = waveform.evaluate(phase.mod(params.pm.value));
+    typename W::SampleType val = waveform.evaluate(phase + params.pm.value);
     analog_t f = params.fHz.value * math::exp2(params.fmExp.value) + params.fmLin.value;
-    phase.accum(dt.scaled(f));
+    phase += (phase_t)(dt * f);
     return val;
   }
 

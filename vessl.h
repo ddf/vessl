@@ -885,24 +885,23 @@ namespace vessl
     
     void setEuler(phase_t pitch, phase_t yaw, phase_t roll);
 
-    template<typename R>
-    void setEuler(R pitchRadians, R yawRadians, R rollRadians)
+    void setEulerRadians(analog_t pitchRadians, analog_t yawRadians, analog_t rollRadians)
     {
-      return setEuler(cast<phase_t>(pitchRadians) / math::twoPi<T>(), 
-        cast<phase_t>(yawRadians) / math::twoPi<T>(), 
-        cast<phase_t>(rollRadians) / math::twoPi<T>());
+      return setEuler(cast<phase_t>(pitchRadians / math::twoPi<analog_t>()), 
+        cast<phase_t>(yawRadians / math::twoPi<analog_t>()), 
+        cast<phase_t>(rollRadians / math::twoPi<analog_t>()));
     }
     
     [[nodiscard]] vector3<T> process(const vector3<T>& input) override
     {
       vector3<T> output;
 
-      //output.x = matrix[0][0] * input.x + matrix[0][1] * input.y + matrix[0][2] * input.z;
-      //output.y = matrix[1][0] * input.x + matrix[1][1] * input.y + matrix[1][2] * input.z;
-      //output.z = matrix[2][0] * input.x + matrix[2][1] * input.y + matrix[2][2] * input.z;
+      output.x = mtrx[0][0] * input.x + mtrx[0][1] * input.y + mtrx[0][2] * input.z;
+      output.y = mtrx[1][0] * input.x + mtrx[1][1] * input.y + mtrx[1][2] * input.z;
+      output.z = mtrx[2][0] * input.x + mtrx[2][1] * input.y + mtrx[2][2] * input.z;
 
       // this might be faster?
-      mtrx.multiply(input.toMatrix(), output.toMatrix());
+      //mtrx.multiply(input.toMatrix(), output.toMatrix());
 
       return output;
     }
@@ -1100,28 +1099,28 @@ namespace vessl
   template<>
   struct parameter::data<analog_t>
   {
-    analog_t value;
+    analog_t value = 0.f;
     static constexpr auto type = valuetype::analog;
   };
   
   template<>
   struct parameter::data<digital_t>
   {
-    digital_t value;
+    digital_t value = 0;
     static constexpr auto type = valuetype::digital;
   };
   
   template<>
   struct parameter::data<binary_t>
   {
-    binary_t value;
+    binary_t value = false;
     static constexpr auto type = valuetype::binary;
   };
   
   template<>
   struct parameter::data<phase_t>
   {
-    phase_t value;
+    phase_t value = PHASE_ZERO;
     static constexpr auto type = valuetype::phase;
   };
   
@@ -2074,6 +2073,7 @@ namespace vessl
     parameter pm() const { return params.pm({ "phase mod", 'p', phase_p::type }); }
 
     T generate() override;
+    void generate(sink<T>& dest);
 
     [[nodiscard]] phase_t getPhase() const { return phase; }
     [[nodiscard]] phase_t getInc() const { return dt; }
@@ -2820,47 +2820,18 @@ namespace vessl
     T cosc = math::cos<T>(pitch);
     T sinc = math::sin<T>(pitch);
 
-    T caXsb = cosa*sinb;
-    T saXsb = sina*sinb;
-
     // row*3 + col
-    data[0] = cosa*cosb;
-    data[1] = caXsb*sinc - sina*cosc;
-    data[2] = caXsb*cosc + sina*sinc;
+    mtrx.set(0, 0, cosa * cosb);
+    mtrx.set(0, 1, cosa * sinb*sinc - sina*cosc);
+    mtrx.set(0, 2, cosa * sinb*cosc + sina*sinc);
 
-    data[3] = sina*cosb;
-    data[4] = saXsb*sinc + cosa*cosc;
-    data[5] = saXsb*cosc - cosa*sinc;
+    mtrx.set(1, 0, sina * cosb);
+    mtrx.set(1, 1, sina * sinb*sinc + cosa*cosc);
+    mtrx.set(1, 2, sina * sinb*cosc - cosa*sinc);
 
-    data[6] = -sinb;
-    data[7] = cosb*sinc;
-    data[8] = cosb*cosc;
-  }
-  
-  template <>
-  template <>
-  inline void transform33<analog_t>::setEuler<analog_t>(analog_t pitch, analog_t yaw, analog_t roll)
-  {
-    analog_t cosa = math::cos<analog_t>(roll);
-    analog_t sina = math::sin<analog_t>(roll);
-
-    analog_t cosb = math::cos<analog_t>(yaw);
-    analog_t sinb = math::sin<analog_t>(yaw);
-
-    analog_t cosc = math::cos<analog_t>(pitch);
-    analog_t sinc = math::sin<analog_t>(pitch);
-
-    mtrx[0][0] = cosa * cosb;
-    mtrx[0][1] = cosa * sinb*sinc - sina * cosc;
-    mtrx[0][2] = cosa * sinb*cosc + sina * sinc;
-
-    mtrx[1][0] = sina * cosb;
-    mtrx[1][1] = sina * sinb*sinc + cosa * cosc;
-    mtrx[1][2] = sina * sinb*cosc - cosa * sinc;
-
-    mtrx[2][0] = -sinb;
-    mtrx[2][1] = cosb * sinc;
-    mtrx[2][2] = cosb * cosc;
+    mtrx.set(2, 0, -sinb);
+    mtrx.set(2, 1, cosb * sinc);
+    mtrx.set(2, 2, cosb * cosc);
   }
 
   template<typename T>
@@ -3326,6 +3297,18 @@ namespace vessl
     analog_t f = params.fHz.value * math::exp2(params.fmExp.value) + params.fmLin.value;
     phase += (phase_t)(dt * f);
     return val;
+  }
+
+  template <class W>
+  inline void oscil<W>::generate(sink<T>& dest)
+  {
+    analog_t f = params.fHz.value * math::exp2(params.fmExp.value) + params.fmLin.value;
+    phase_t pInc = (phase_t)(dt * f);
+    while(!dest.isFull())
+    {
+      dest << waveform.evaluate(phase + params.pm.value);
+      phase += pInc;
+    }
   }
 
   template<typename T>

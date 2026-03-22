@@ -72,7 +72,8 @@ namespace vessl
     }
     friend constexpr q31 operator+(q31 lhs, const q31& rhs) { lhs += rhs; return lhs; }
 
-    q31& operator-() { v_ = (v_ == INT32_MIN ? INT32_MAX : INT32_MAX - v_); return *this; }
+    q31& operator-() { v_ = (v_ == INT32_MIN ? INT32_MAX : -v_); return *this; }
+
     q31& operator-=(const q31& rhs) 
     {
       v_ = sat((int64_t)v_ - (int64_t)rhs.v_).v_; 

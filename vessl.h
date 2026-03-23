@@ -30,13 +30,6 @@
 #include <cstring>
 #include <limits>
 
-// When built for ARM Cortex-M processor series,
-// we provide template specializations that use the optimized CMSIS library:
-// http://www.keil.com/pack/doc/CMSIS/General/html/index.html
-#ifdef ARM_CORTEX
-#include "arm_math.h" 
-#endif //ARM_CORTEX
-
 // because some people like to redefine these math functions with macros
 #ifdef sqrt
 #undef sqrt
@@ -108,7 +101,7 @@ namespace vessl
   template<>
   constexpr analog_t cast<analog_t, phase_t>(const phase_t& from)
   {
-    return static_cast<analog_t>(from) / 4294967295.0;
+    return static_cast<analog_t>(from) / 4294967295.0f;
   }
 
   template<>
@@ -141,7 +134,7 @@ namespace vessl
     source& operator=(const source&) = default;
     source& operator=(source&&) = default;
 
-    virtual binary_t isEmpty() const = 0;
+    [[nodiscard]] virtual binary_t isEmpty() const = 0;
     virtual T read() = 0;
 
     explicit operator bool() const { return !isEmpty(); }
@@ -691,18 +684,6 @@ namespace vessl
 
     template<typename T, typename R = T>
     T cos(R r) { return std::cos(r); }
-    
-    template<>
-    inline analog_t sin<analog_t, phase_t>(phase_t z) 
-    { 
-      return math::sin<analog_t>(math::twoPi<analog_t>() * cast<analog_t>(z)); 
-    }
-
-    template<>
-    inline analog_t cos<analog_t, phase_t>(phase_t z) 
-    { 
-      return math::cos<analog_t>(math::twoPi<analog_t>() * cast<analog_t>(z)); 
-    }
 
     template<typename T>
     T sqrt(T x) { return std::sqrt(x); }
@@ -2440,165 +2421,29 @@ namespace vessl
 // implementation
 //
 
+#ifdef ARM_CORTEX
+#include "vessl_arm_math.inl"
+#endif
+
 #include "vessl_qmath.inl"
 
 namespace vessl
 {
-  
-#ifdef ARM_CORTEX
-  template<>
-  inline void array<float32_t>::copyTo(array dest)
-  {
-    VASSERT(this->getSize() <= dest.getSize(), "Not enough room in destination for this array");
-    arm_copy_f32(data, dest.getData(), this->getSize());
-  }
-
-  template<>
-  inline void array<float32_t>::fill(float value)
-  {
-    arm_fill_f32(value, data, size);  
-  }
-  
-  template<>
-  inline array<float32_t> array<float32_t>::offset(float value, array dest) const
-  {
-    VASSERT(this->getSize() <= dest.getSize(), "Not enough room in destination for this array");
-    arm_offset_f32(data, value, dest.getData(), this->getSize());
-    return dest;
-  }
-  
-  template<>
-  inline array<float32_t> array<float32_t>::add(array other, array dest) const
-  {
-    VASSERT(size == other.size && size <= dest.size, "Arrays are different sizes or dest is not large enough.");
-    arm_add_f32(data, other.data, dest.data, size);
-    return dest;
-  }
-
-  template<>
-  inline array<float32_t> array<float32_t>::subtract(array other, array dest) const
-  {
-    VASSERT(size == other.size && size <= dest.size, "Arrays are different sizes or dest is not large enough.");
-    arm_sub_f32(data, other.data, dest.data, size);
-    return dest;
-  }
-
-  template<>
-  inline array<float32_t> array<float32_t>::scale(float32_t value, array dest) const
-  {
-    VASSERT(size <= dest.size, "Destination array is not large enough");
-    arm_scale_f32(data, value, dest.data, size);
-    return dest;
-  }
-
-  template<>
-  inline array<float32_t> array<float32_t>::multiply(array other, array dest) const
-  {
-    VASSERT(size == other.size && size <= dest.size, "Arrays are different sizes or dest is not large enough.");
-    arm_mult_f32(data, other.data, dest.data, size);
-    return dest;
-  }
-  
-  template<>
-  struct matrixData<float32_t>
-  {
-    arm_matrix_instance_f32 inst;
-    matrixData() { arm_mat_init_f32(&inst, 0, 0, nullptr); };
-    matrixData(float32_t* data, uint32_t r, uint32_t c) { arm_mat_init_f32(&inst, r, c, data); }
-    
-    float32_t* operator*() { return inst.pData; }
-    float32_t* operator*() const { return inst.pData; }
-    [[nodiscard]] uint32_t rows() const { return inst.numRows; }
-    [[nodiscard]] uint32_t cols() const { return inst.numCols; }
-  };
-  
-  template<>
-  inline matrix<float32_t> matrix<float32_t>::add(matrix other, matrix dest) const
-  {
-    VASSERT(rows == other.rows && rows == dest.rows && columns == other.columns && colums == dest.columns, "matrices do not have the same dimentions");
-    arm_mat_add_f32(&data.inst, &other.data.inst, &dest.data.inst);
-    return dest;
-  }
-
-  template<>
-  inline matrix<float32_t> matrix<float32_t>::subtract(matrix other, matrix dest) const
-  {
-    VASSERT(rows == other.rows && rows == dest.rows && columns == other.columns && colums == dest.columns, "matrices do not have the same dimentions");
-    arm_mat_sub_f32(&data.inst, &other.data.inst, &dest.data.inst);
-    return dest;
-  }
-  
-  template<>
-  inline matrix<float32_t> matrix<float32_t>::scale(float32_t value, matrix dest) const
-  {
-    arm_mat_scale_f32(&data.inst, value, &dest.data.inst);
-    return dest;
-  }
-  
-  template<>
-  inline matrix<float32_t> matrix<float32_t>::multiply(matrix other, matrix dest) const
-  {
-    VASSERT(getColumns() == other.getRows(), "Incompatible matrix sizes in operands");
-    VASSERT(dest.getRows() == getRows(), "Incorrect number of rows in destination");
-    VASSERT(dest.getColumns() == other.getColumns(), "Incorrect number of columns in destination");
-    arm_mat_mult_f32(&data.inst, &other.data.inst, &dest.data.inst);
-    return dest;
-  }
-  
-  // @todo can implement when/if I update the version of CMSIS used by OWL
-  // template<>
-  // inline array<float32_t> matrix<float32_t>::multiply(array<float32_t> vector, array<float32_t> dest) const
-  // {
-  //   VASSERT(getColumns() == vector.getSize(), "Incompatible operands");
-  //   VASSERT(dest.getSize() == getRows(), "Incompatible destination size");
-  //   return dest;
-  // }
-  
-  namespace math
+  namespace  math
   {
     template<>
-    inline float32_t sinr(float32_t r) { return arm_sin_f32(r); }
+    inline analog_t sin<analog_t, phase_t>(phase_t z) 
+    { 
+      return math::sin<analog_t>(math::twoPi<analog_t>() * cast<analog_t>(z)); 
+    }
 
     template<>
-    inline float32_t sqrt(float32_t x)
-    {
-      float out;
-      if (ARM_MATH_SUCCESS == arm_sqrt_f32(x, &out))
-      {
-        return out;
-      }
-      return 0;
+    inline analog_t cos<analog_t, phase_t>(phase_t z) 
+    { 
+      return math::cos<analog_t>(math::twoPi<analog_t>() * cast<analog_t>(z)); 
     }
   }
   
-  namespace filtering
-  {
-    template<size_t STAGES>
-    template<class CoGen>
-    struct biquad<STAGES>::df2T<float, CoGen> final : cascade<float, 2>
-    {
-      arm_biquad_cascade_df2T_instance_f32 inst;
-          
-      using biquad<STAGES>::cascade<float, 2>::coeff;
-      using biquad<STAGES>::cascade<float, 2>::state;
-      using biquad<STAGES>::cascade<float, 2>::getCoeffSize;
-      using biquad<STAGES>::cascade<float, 2>::getStateSize;
-    
-      static CoGen cg;
-  
-      df2T() { arm_biquad_cascade_df2T_init_f32(&inst, STAGES, coeff.getData(), state.getData()); }
-    
-      size_t getStageCount() const { return STAGES; }
-  
-      void process(const float* source, float* dest, size_t blockSize, const args& args)
-      {
-        cg(coeff.getData(), args.omega(), args.q, args.g);
-        arm_biquad_cascade_df2T_f32(&inst, source, dest, blockSize);
-      }
-    };
-  }
-#endif
-
   template<typename T>
   void processor<T>::process(source<T>& in, sink<T>& out)
   {

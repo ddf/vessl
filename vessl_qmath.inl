@@ -113,8 +113,8 @@ namespace vessl
     template<>
     inline q31 lerpp<q31>(q31 begin, q31 end, phase_t t)
     {
-      return t <= PHASE_ZERO ? begin 
-          : t >= PHASE_360 ? end 
+      return t == PHASE_ZERO ? begin 
+          : t == PHASE_360 ? end 
           : begin + (end-begin)*cast<q31>(t);
     }
   }

@@ -33,7 +33,7 @@ SOFTWARE.
 namespace vessl
 {
   template<>
-  constexpr q31 cast<q31, analog_t>(const analog_t& from)
+  [[nodiscard]] VESSL_INLINE constexpr q31 cast<q31, analog_t>(const analog_t& from)
   {
     analog_t f = from < -1.0f ? -1.0f : from > 1.0f ? 1.0f : from;
     int32_t v = static_cast<int32_t>(f * 2147483648.0f);
@@ -41,31 +41,31 @@ namespace vessl
   }
   
   template<>
-  constexpr analog_t cast<analog_t, q31>(const q31& from)
+  [[nodiscard]] VESSL_INLINE constexpr analog_t cast<analog_t, q31>(const q31& from)
   {
     return static_cast<analog_t>(from.v_) / 2147483648.0f;
   }
 
   template<>
-  constexpr q31 cast<q31, phase_t>(const phase_t& from)
+  [[nodiscard]] VESSL_INLINE constexpr q31 cast<q31, phase_t>(const phase_t& from)
   {
     return q31(static_cast<int32_t>(from / 2));
   }
 
   template<>
-  constexpr phase_t cast<phase_t, q31>(const q31& from)
+  [[nodiscard]] VESSL_INLINE constexpr phase_t cast<phase_t, q31>(const q31& from)
   {
     int32_t v = from.v_ < 0 ? from.v_ + INT32_MAX + 1 : from.v_;
     // off by one when v == INT32_MAX, but probably OK?
     return static_cast<uint32_t>(v) << 1;
   }
 
-  constexpr analog_t operator*(const analog_t& lhs, const q31& rhs)
+  [[nodiscard]] VESSL_INLINE constexpr analog_t operator*(const analog_t& lhs, const q31& rhs)
   {
     return lhs * cast<analog_t>(rhs);
   }
 
-  constexpr analog_t operator*(const q31& lhs, const analog_t& rhs)
+  [[nodiscard]] VESSL_INLINE constexpr analog_t operator*(const q31& lhs, const analog_t& rhs)
   {
     return cast<analog_t>(lhs) * rhs;
   }
@@ -73,7 +73,7 @@ namespace vessl
   namespace math
   {
     template<>
-    inline q31 abs<q31>(const q31& x)
+    [[nodiscard]] VESSL_INLINE q31 abs<q31>(const q31& x)
     {
       if (x == q31::min())
       {
@@ -83,26 +83,26 @@ namespace vessl
     }
 
     template<>
-    inline q31 sin<q31, phase_t>(phase_t phase) 
+    [[nodiscard]] VESSL_INLINE q31 sin<q31, phase_t>(phase_t phase) 
     { 
       int32_t v = static_cast<int32_t>(phase >> 1);
       return q31(qmath_sine_table[v >> QMATH_SINE_TABLE_SHIFT_Q31]);
     }
 
     template<>
-    inline q31 cos<q31, phase_t>(phase_t phase) 
+    [[nodiscard]] VESSL_INLINE q31 cos<q31, phase_t>(phase_t phase) 
     { 
       return sin<q31>(phase + PHASE_90);
     }
 
     template<>
-    inline q31 sin<q31, analog_t>(analog_t radians) 
+    [[nodiscard]] VESSL_INLINE q31 sin<q31, analog_t>(analog_t radians) 
     { 
       return sin<q31>(cast<phase_t>(radians / twoPi<analog_t>()));
     }
 
     template<>
-    inline q31 cos<q31, analog_t>(analog_t radians) 
+    [[nodiscard]] VESSL_INLINE q31 cos<q31, analog_t>(analog_t radians) 
     { 
       return cos<q31>(cast<phase_t>(radians / twoPi<analog_t>()));
     }
@@ -111,7 +111,7 @@ namespace vessl
   namespace easing
   {
     template<>
-    inline q31 lerpp<q31>(q31 begin, q31 end, phase_t t)
+    [[nodiscard]] VESSL_INLINE q31 lerpp<q31>(q31 begin, q31 end, phase_t t)
     {
       return t == PHASE_ZERO ? begin 
           : t == PHASE_360 ? end 

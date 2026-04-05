@@ -86,7 +86,7 @@ namespace vessl
   // we use this in place of static_cast throughout the library for non-pointer types
   // so that we can specialize conversions between some of our value types (e.g. phase_t <--> analog_t)
   template<typename T, typename F>
-  constexpr T cast(const F& from) { return static_cast<T>(from); }
+  VESSL_INLINE constexpr T cast(const F& from) { return static_cast<T>(from); }
 
   // phase t <--> digital_t (@todo convert to degrees?)
   template<>
@@ -285,30 +285,30 @@ namespace vessl
     
     // adds value to every element in the array, returns dest
     array offset(T value, array dest) const;
-    array offset(T value) { return offset(value, *this); }
+    VESSL_INLINE array offset(T value) { return offset(value, *this); }
     
     // element-wise addition of this and other, returns dest
     array add(array other, array dest) const;
-    array add(array other) { return add(other, *this); }
+    VESSL_INLINE array add(array other) { return add(other, *this); }
     
     // element-wise subtraction of this and other, returns dest
     array subtract(array other, array dest) const;
-    array subtract(array other) { return subtract(other, *this); }
+    VESSL_INLINE array subtract(array other) { return subtract(other, *this); }
     
     // scales every element in this array by value, returns dest
     array scale(T value, array dest) const;
-    array scale(T value) { return scale(value, *this); }
+    VESSL_INLINE array scale(T value) { return scale(value, *this); }
     
     // element-wise multiplication of this and other, returns dest
     array multiply(array other, array dest) const;
-    array multiply(array other) { return multiply(other, *this); }
+    VESSL_INLINE array multiply(array other) { return multiply(other, *this); }
   };
 
   template<typename T>
-  T* begin(array<T>& arr) { return arr.begin(); }
+  VESSL_INLINE T* begin(array<T>& arr) { return arr.begin(); }
 
   template<typename T>
-  T* end(array<T>& arr) { return arr.end(); }
+  VESSL_INLINE T* end(array<T>& arr) { return arr.end(); }
   
   template<typename T>
   struct matrixData
@@ -631,49 +631,49 @@ namespace vessl
     VESSL_INLINE constexpr phase_t twoPi() { return PHASE_360; }
 
     template<typename T>
-    T abs(const T& val) { return ::abs(val); }
+    VESSL_INLINE T abs(const T& val) { return ::abs(val); }
     
     template<typename T>
-    T constrain(T val, T low, T high) { return val < low ? low : val > high ? high : val; }
+    VESSL_INLINE T constrain(T val, T low, T high) { return val < low ? low : val > high ? high : val; }
     
     template<typename T>
-    T epsilon() { return std::numeric_limits<T>::epsilon(); }
+    VESSL_INLINE T epsilon() { return std::numeric_limits<T>::epsilon(); }
 
     template<typename T>
-    T exp(T v) { return ::exp(v); }
+    VESSL_INLINE T exp(T v) { return ::exp(v); }
 
     template<typename T>
-    T exp2(T v) { return ::exp2(v); }
+    VESSL_INLINE T exp2(T v) { return ::exp2(v); }
 
     template<typename T>
-    T exp10(T v) { return ::pow(T(10), v); }
+    VESSL_INLINE T exp10(T v) { return ::pow(T(10), v); }
     
     template<typename T>
-    T log(T v) { return ::log(v); }
+    VESSL_INLINE T log(T v) { return ::log(v); }
 
     template<typename T>
-    T log10(T v) { return ::log10(v); }
+    VESSL_INLINE T log10(T v) { return ::log10(v); }
     
     template<typename T>
-    T max(const T& a, const T& b) { return a > b ? a : b; }
+    VESSL_INLINE T max(const T& a, const T& b) { return a > b ? a : b; }
 
     template<typename T>
-    T min(const T& a, const T& b) { return a < b ? a : b; }
+    VESSL_INLINE T min(const T& a, const T& b) { return a < b ? a : b; }
 
     template<typename T>
-    T mod(T v, T* i) { return std::modf(v, i); }
+    VESSL_INLINE T mod(T v, T* i) { return std::modf(v, i); }
 
     template<typename T>
-    T pow(T x, T y) { return ::pow(x, y); }
+    VESSL_INLINE T pow(T x, T y) { return ::pow(x, y); }
 
     template<typename T>
-    T round(T x) { return ::round(x); }
+    VESSL_INLINE T round(T x) { return ::round(x); }
     
     template<typename T>
-    T floor(T x) { return ::floor(x); }
+    VESSL_INLINE T floor(T x) { return ::floor(x); }
 
     template<typename T, size_t N>
-    frame::channels<T, N> round(frame::channels<T, N> x)
+    VESSL_INLINE frame::channels<T, N> round(frame::channels<T, N> x)
     {
       frame::channels<T, N> result;
       for (size_t i = 0; i < N; i++)
@@ -684,22 +684,22 @@ namespace vessl
     }
 
     template<typename T, typename R = T>
-    T sin(R r) { return std::sin(r); }
+    VESSL_INLINE T sin(R r) { return std::sin(r); }
 
     template<typename T, typename R = T>
-    T cos(R r) { return std::cos(r); }
+    VESSL_INLINE T cos(R r) { return std::cos(r); }
 
     template<typename T>
-    T sqrt(T x) { return std::sqrt(x); }
+    VESSL_INLINE T sqrt(T x) { return std::sqrt(x); }
     
     template<typename T>
-    T sqrt2() { static T v = sqrt(2); return v; }
+    VESSL_INLINE T sqrt2() { static T v = sqrt(2); return v; }
 
     template<typename T>
-    T tan(T x) { return std::tan(x); }
+    VESSL_INLINE T tan(T x) { return std::tan(x); }
     
     template<typename T>
-    T wrap(T val, T low, T high)
+    VESSL_INLINE T wrap(T val, T low, T high)
     {
       // @todo probably a way to do this without while loops.
       T diff = high - low;
@@ -710,26 +710,26 @@ namespace vessl
 
     // @todo use modf here
     template<typename T>
-    T wrap01(T val) { return wrap(val, T(0), T(1)); }
+    VESSL_INLINE T wrap01(T val) { return wrap(val, T(0), T(1)); }
 
     template<>
-    inline phase_t wrap01<phase_t>(phase_t val) { return val; }
+    VESSL_INLINE phase_t wrap01<phase_t>(phase_t val) { return val; }
     
     template<>
-    inline analog_t wrap01<analog_t>(analog_t v) { analog_t i; analog_t f = mod(v, &i); return f < 0 ? f + 1.0f : f; }
+    VESSL_INLINE analog_t wrap01<analog_t>(analog_t v) { analog_t i; analog_t f = mod(v, &i); return f < 0 ? f + 1.0f : f; }
 
     template<typename T>
     VESSL_INLINE binary_t isNan(T n) { return isnan(n); }
     
     // xore because xor is a keyword
     template<typename T>
-    T xore(const T& a, const T& b)
+    VESSL_INLINE T xore(const T& a, const T& b)
     {
       return a ^ b;
     }
     
     template<>
-    inline analog_t xore(const analog_t& a, const analog_t& b)
+    VESSL_INLINE analog_t xore(const analog_t& a, const analog_t& b)
     {
       return xore(cast<digital_t>(a), cast<digital_t>(b));
     }
@@ -858,9 +858,9 @@ namespace vessl
       setIdentity();
     }
 
-    [[nodiscard]] matrix<T> getMatrix() const { return mtrx; }
+    [[nodiscard]] VESSL_INLINE matrix<T> getMatrix() const { return mtrx; }
   
-    void setIdentity() 
+    VESSL_INLINE void setIdentity() 
     {
       mtrx.clear();
       for (size_t i = 0; i < 3; i++) {
@@ -870,14 +870,14 @@ namespace vessl
     
     void setEuler(phase_t pitch, phase_t yaw, phase_t roll);
 
-    void setEulerRadians(analog_t pitchRadians, analog_t yawRadians, analog_t rollRadians)
+    VESSL_INLINE void setEulerRadians(analog_t pitchRadians, analog_t yawRadians, analog_t rollRadians)
     {
       return setEuler(cast<phase_t>(pitchRadians / math::twoPi<analog_t>()), 
         cast<phase_t>(yawRadians / math::twoPi<analog_t>()), 
         cast<phase_t>(rollRadians / math::twoPi<analog_t>()));
     }
     
-    [[nodiscard]] vector3<T> process(const vector3<T>& input) override
+    [[nodiscard]] VESSL_INLINE vector3<T> process(const vector3<T>& input) override
     {
       vector3<T> output;
 
@@ -936,7 +936,7 @@ namespace vessl
       id_t          id;
       valuetype     type;
       
-      static desc empty() { return {"", 0, valuetype::none}; }
+      VESSL_INLINE static desc empty() { return {"", 0, valuetype::none}; }
     };
     
     template<size_t N>
@@ -945,7 +945,7 @@ namespace vessl
       static constexpr size_t size = N;
       desc descs[N];
       
-      constexpr desc operator[](id_t id) const
+      VESSL_INLINE constexpr desc operator[](id_t id) const
       {
         for (size_t i = 0; i < size; ++i)
         {
@@ -973,10 +973,10 @@ namespace vessl
     constexpr parameter(parameter& param) : description(param.description), pdata(param.pdata) {};
     constexpr parameter(const parameter& param) : description(param.description), pdata(const_cast<void*>(param.pdata)) {};
     
-    const desc& getDescription() const { return description; }
+    [[nodiscard]] VESSL_INLINE const desc& getDescription() const { return description; }
     
     template<typename T>
-    T read() const
+    VESSL_INLINE T read() const
     {
       switch (description.type)
       {
@@ -991,19 +991,19 @@ namespace vessl
       return *static_cast<T*>(pdata);
     }
 
-    binary_t  readBinary()  const { return read<binary_t>(); }
-    digital_t readDigital() const { return read<digital_t>(); }
-    analog_t  readAnalog()  const { return read<analog_t>(); }
-    phase_t   readPhase()   const { return read<phase_t>(); }
+    VESSL_INLINE binary_t  readBinary()  const { return read<binary_t>(); }
+    VESSL_INLINE digital_t readDigital() const { return read<digital_t>(); }
+    VESSL_INLINE analog_t  readAnalog()  const { return read<analog_t>(); }
+    VESSL_INLINE phase_t   readPhase()   const { return read<phase_t>(); }
     
-    explicit operator binary_t()  const { return read<binary_t>(); }
-    explicit operator digital_t() const { return read<digital_t>(); }
-    explicit operator analog_t()  const { return read<analog_t>(); }
-    explicit operator phase_t()   const { return read<phase_t>(); }
+    VESSL_INLINE explicit operator binary_t()  const { return read<binary_t>(); }
+    VESSL_INLINE explicit operator digital_t() const { return read<digital_t>(); }
+    VESSL_INLINE explicit operator analog_t()  const { return read<analog_t>(); }
+    VESSL_INLINE explicit operator phase_t()   const { return read<phase_t>(); }
 
     // static-cast T to parameter type before assign
     template<typename T>
-    parameter& write(const T& value)
+    VESSL_INLINE parameter& write(const T& value)
     {
       switch (description.type)
       {
@@ -1019,13 +1019,13 @@ namespace vessl
     }
     
     template<typename T>
-    parameter& operator=(const T& value)
+    VESSL_INLINE parameter& operator=(const T& value)
     {
       write(value);
       return *this;
     }
     
-    parameter& operator=(const parameter& rhs)
+    VESSL_INLINE parameter& operator=(const parameter& rhs)
     {
       if (&rhs != this)
       {
@@ -1064,14 +1064,14 @@ namespace vessl
     // @todo access by ID
   };
 
-  inline parameters::iterator begin(const parameters& lst) { return parameters::iterator::begin(lst); }
-  inline parameters::iterator end(const parameters& lst)   { return parameters::iterator::end(lst); }
+  VESSL_INLINE parameters::iterator begin(const parameters& lst) { return parameters::iterator::begin(lst); }
+  VESSL_INLINE parameters::iterator end(const parameters& lst)   { return parameters::iterator::end(lst); }
   
   template<size_t N>
   struct plist : parameters
   {
     static constexpr size_t plsz = N;
-    size_t getSize() const override { return N; }
+    VESSL_INLINE size_t getSize() const override { return N; }
   };
   
   template<>
@@ -1138,7 +1138,7 @@ namespace vessl
   typedef param<gain>      gain_p;
   typedef param<duration>  duration_p;
 
-  inline parameter parameter::none() { data<void*> v; return parameter(desc::empty(), v); }
+  VESSL_INLINE parameter parameter::none() { data<void*> v; return parameter(desc::empty(), v); }
   
   template<typename T>
   procSample<T> operator>>(const parameter& p, processor<T>& proc) { return procSample<T>(proc, p.read<T>()); }
@@ -1201,8 +1201,8 @@ namespace vessl
     // @todo get parameter by name / id
   };
   
-  inline const parameter::desc* begin(const unit::description& desc) { return desc.params; }
-  inline const parameter::desc* end(const unit::description& desc) { return desc.params + desc.paramCount; }
+  VESSL_INLINE const parameter::desc* begin(const unit::description& desc) { return desc.params; }
+  VESSL_INLINE const parameter::desc* end(const unit::description& desc) { return desc.params + desc.paramCount; }
 
   template<typename T>
   class unitGenerator : public unit, public generator<T>
@@ -1239,7 +1239,7 @@ namespace vessl
     };
     
     template<typename T, typename I = linear<T>>
-    T sample(const T* buffer, analog_t fracIdx)
+    VESSL_INLINE T sample(const T* buffer, analog_t fracIdx)
     {
       VASSERT(fracIdx >= 0, "fracIdx argument to sample must be non-negative");
       static I interpolator;
@@ -1252,15 +1252,15 @@ namespace vessl
     // implements the xorshifter algorithm
     static constexpr uint32_t U32_MAX = UINT32_MAX;
     static uint32_t ru32Seed = 33641;
-    inline void su32(uint32_t seed) {ru32Seed = seed; }
-    inline uint32_t u32()
+    VESSL_INLINE void su32(uint32_t seed) {ru32Seed = seed; }
+    VESSL_INLINE uint32_t u32()
     {
       ru32Seed ^= ru32Seed << 13; ru32Seed ^= ru32Seed >> 17; ru32Seed ^= ru32Seed << 5;
       return ru32Seed;
     }
 
     template<typename T>
-    T range(T low, T high)
+    VESSL_INLINE T range(T low, T high)
     {
       static constexpr analog_t SCALE = 1/4294967296.0;
       analog_t r = cast<analog_t>(u32()) * SCALE;
@@ -1306,17 +1306,17 @@ namespace vessl
 
     // easing is first parameter so T can be deduced
     template<typename E, typename T>
-    T interp(T begin, T end, analog_t t)
+    VESSL_INLINE T interp(T begin, T end, analog_t t)
     {
       static E ease;
       return (end-begin) * ease(math::constrain(t, 0.f, 1.f)) + begin;
     }
 
     template<typename T>
-    T lerp(T begin, T end, analog_t t) { return interp<linear, T>(begin, end, t); }
+    VESSL_INLINE T lerp(T begin, T end, analog_t t) { return interp<linear, T>(begin, end, t); }
     
     template<typename T>
-    T lerpp(T begin, T end, phase_t t) 
+    VESSL_INLINE T lerpp(T begin, T end, phase_t t) 
     { 
       return t == PHASE_ZERO ? begin 
            : t == PHASE_360 ? end 
@@ -1325,10 +1325,10 @@ namespace vessl
     }
     
     template<typename T>
-    T smooth(T value, T target, analog_t degree = 0.9f) { return value*degree + (1.0 - degree)*target; }
+    VESSL_INLINE T smooth(T value, T target, analog_t degree = 0.9f) { return value*degree + (1.0 - degree)*target; }
     
     template<>
-    inline digital_t smooth<digital_t>(digital_t value, digital_t target, analog_t degree) { return (value*degree + target)/(degree+1);  }
+    VESSL_INLINE digital_t smooth<digital_t>(digital_t value, digital_t target, analog_t degree) { return (value*degree + target)/(degree+1);  }
   }
 
   // analog unipolar noise generators that generate values in the range [0,1]

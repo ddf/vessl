@@ -858,6 +858,11 @@ namespace vessl
       setIdentity();
     }
 
+    transform33(const transform33& other) : mtrx(data, 3, 3)
+    {
+      memcpy(data, other.data, sizeof(T)*3*3);
+    }
+
     [[nodiscard]] VESSL_INLINE matrix<T> getMatrix() const { return mtrx; }
   
     VESSL_INLINE void setIdentity() 

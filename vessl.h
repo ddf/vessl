@@ -367,7 +367,10 @@ namespace vessl
     // matrix vector multiplication of this and vector, returns dest
     array<T> multiply(const array<T>& vector, array<T> dest) const;
   };
+
   
+  // @todo actually probably don't need this, should make it an alias for a 3-channel frame.
+  // and add toMatrix() to the channels class.
   template<typename T>
   struct vector3
   {
@@ -788,7 +791,7 @@ namespace vessl
     analog_t toSeconds(analog_t sampleRate) const { return samples/sampleRate; }
   };
 
-  template<typename T>
+  template<typename T, typename F = T>
   class processor
   {
   public:
@@ -799,9 +802,9 @@ namespace vessl
     processor& operator=(const processor&) = delete;
     processor& operator=(processor&&) = delete;
 
-    virtual T process(const T& in) = 0;
-    virtual void process(source<T>& in, sink<T>& out);
-    virtual void process(array<T> in, array<T> out);
+    virtual T process(const F& in) = 0;
+    virtual void process(source<F>& in, sink<T>& out);
+    virtual void process(array<F> in, array<T> out);
   };
   
   template<typename T>
@@ -1216,11 +1219,11 @@ namespace vessl
     explicit unitGenerator() : unit(), generator<T>() {}
   };
 
-  template<typename T>
-  class unitProcessor : public unit, public processor<T>
+  template<typename T, typename F = T>
+  class unitProcessor : public unit, public processor<T,F>
   {
   protected:
-    explicit unitProcessor() : unit(), processor<T>() {}
+    explicit unitProcessor() : unit(), processor<T,F>() {}
   };
 
   namespace interpolation
@@ -2453,8 +2456,8 @@ namespace vessl
     }
   }
   
-  template<typename T>
-  void processor<T>::process(source<T>& in, sink<T>& out)
+  template<typename T, typename F>
+  void processor<T,F>::process(source<F>& in, sink<T>& out)
   {
     while (in && out)
     {
@@ -2462,8 +2465,8 @@ namespace vessl
     }
   }
 
-  template<typename T>
-  void processor<T>::process(array<T> in, array<T> out)
+  template<typename T, typename F>
+  void processor<T,F>::process(array<F> in, array<T> out)
   {
     auto r = in.getReader();
     auto w = out.getWriter();

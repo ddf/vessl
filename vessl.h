@@ -1,6 +1,6 @@
 ////////////////////////////////////////////////////////////////////////////////////
 //
-// Copyright (c) 2025 Damien Quartz
+// Copyright (c) 2025-2026 Damien Quartz
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -29,6 +29,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <utility>
 
 // because some people like to redefine these math functions with macros
 #ifdef sqrt
@@ -64,8 +65,15 @@ static void assert(bool condition) { }
 
 #define VASSERT(cond, msg) assert((void(msg), cond))
 
-// @todo alternate definition for MSVC
+// MSVC check: Source - https://stackoverflow.com/a/77012222
+// Posted by Peter Cordes
+// Retrieved 2026-05-17, License - CC BY-SA 4.0
+#if defined(_MSC_VER) && !defined(__llvm__) && !defined(__INTEL_COMPILER)
+#define VESSL_INLINE __forceinline
+#else
 #define VESSL_INLINE __attribute__((always_inline)) inline
+#endif
+
 
 // Note: In all classes using typename T, it is assumed to be POD and to have support for all arithmetic operators
 namespace vessl
@@ -320,8 +328,8 @@ namespace vessl
     VESSL_INLINE matrixData() : pData(nullptr), numRows(0), numCols(0) {}
     VESSL_INLINE matrixData(T* d, uint32_t r, uint32_t c) : pData(d), numRows(r), numCols(c) {}
     
-    VESSL_INLINE T* operator*() { return pData; }
-    VESSL_INLINE T* operator*() const { return pData; }
+    [[nodiscard]] VESSL_INLINE T* operator*() { return pData; }
+    [[nodiscard]] VESSL_INLINE T* operator*() const { return pData; }
     [[nodiscard]] VESSL_INLINE uint32_t rows() const { return numRows; }
     [[nodiscard]] VESSL_INLINE uint32_t cols() const { return numCols; }
   };
@@ -368,81 +376,6 @@ namespace vessl
     array<T> multiply(const array<T>& vector, array<T> dest) const;
   };
 
-  
-  // @todo actually probably don't need this, should make it an alias for a 3-channel frame.
-  // and add toMatrix() to the channels class.
-  template<typename T>
-  struct vector3
-  {
-    T x, y, z;
-  
-    VESSL_INLINE constexpr vector3() : x(0LL), y(0LL), z(0LL) {}
-    VESSL_INLINE constexpr vector3(const vector3&) = default;
-    VESSL_INLINE constexpr vector3(T inX, T inY, T inZ) : x(inX), y(inY),  z(inZ) {}
-    VESSL_INLINE constexpr vector3(vector3&&) = default;
-    VESSL_INLINE ~vector3() = default;
-  
-    VESSL_INLINE matrix<T> toMatrix() const { return vessl::matrix<T>(const_cast<T*>(&x), 3, 1); }
-
-    [[nodiscard]] VESSL_INLINE T getMagnitude() const;
-    [[nodiscard]] VESSL_INLINE T getMagnitudeSquared() const { return x*x + y*y + z*z; }
-
-    void setSpherical(T radius, analog_t inclination, analog_t azimuth);
-
-    VESSL_INLINE vector3& operator=(const vector3& other) = default;
-    VESSL_INLINE vector3& operator=(vector3&& other) = default;
-
-    VESSL_INLINE vector3& operator+=(const vector3& other) 
-    {
-      x += other.x;
-      y += other.y;
-      z += other.z;
-      return *this;
-    }
-
-    VESSL_INLINE friend vector3 operator+(vector3 lhs, const vector3& rhs)
-    {
-      lhs += rhs;
-      return lhs;
-    }
-
-    VESSL_INLINE vector3& operator-=(const vector3& other) 
-    {
-      x -= other.x;
-      y -= other.y;
-      z -= other.z;
-      return *this;
-    }
-
-    VESSL_INLINE friend vector3 operator-(vector3 lhs, const vector3& rhs)
-    {
-      lhs -= rhs;
-      return lhs;
-    }
-
-    VESSL_INLINE vector3& operator*=(const T& scalar) 
-    {
-      x *= scalar;
-      y *= scalar;
-      z *= scalar;
-      return *this;
-    }
-
-    VESSL_INLINE friend vector3 operator*(vector3 lhs, const T& rhs)
-    {
-      lhs *= rhs;
-      return lhs;
-    }
-
-    VESSL_INLINE vector3& operator/=(const T& scalar) 
-    {
-      x /= scalar;
-      y /= scalar;
-      z /= scalar;
-      return *this;
-    }
-  };
-  
   namespace frame
   {
     template<typename T, size_t N>
@@ -466,152 +399,30 @@ namespace vessl
       T samples[N];
       VESSL_INLINE channels() : array<T>(samples, N) { array<T>::fill(0); }
       VESSL_INLINE explicit channels(T m) : array<T>(samples, N) { array<T>::fill(m); }
-      VESSL_INLINE channels(channels const& other) : array<T>(samples, N) { other.copyTo(*this); }
+      VESSL_INLINE channels(const channels& other) : array<T>(samples, N) { other.copyTo(*this); }
       // @todo move and assignment operators
-      
-      VESSL_INLINE channels<T, 1> toMono() const
-      {
-        T sum = 0;
-        for (size_t c = 0; c < N; ++c)
-        {
-          sum += samples[c];
-        }
-        return channels<T, 1>(sum / N);
-      }
-    };
 
-    template<typename T>
-    struct channels<T, 1> : array<T>
-    {
-      T samples[1];
-      VESSL_INLINE channels() : array<T>(samples, 1) { samples[0] = 0; }
-      VESSL_INLINE explicit channels(T m) : array<T>(samples, 1) { samples[0] = m; }
-      VESSL_INLINE channels(const channels& other) : array<T>(samples, 1) { samples[0] = other.samples[0]; }
-      VESSL_INLINE channels(channels&& other) noexcept : array<T>(samples, 1) { samples[0] = std::move(other.samples[0]); }
-      VESSL_INLINE ~channels() = default;
-      
-      VESSL_INLINE channels& operator=(const channels& other)  // NOLINT(bugprone-unhandled-self-assignment)
-      {
-        if (this == &other)
-        {
-          return *this;
-        }
-        
-        samples[0] = other.samples[0];
-        return *this;
-      }
-      
-      VESSL_INLINE channels& operator=(channels&& other) noexcept
-      {
-        if (this == &other)
-        {
-          return *this;
-        }
-        
-        samples[0] = std::move(other.samples[0]);
-        return *this;
-      }
-      
-      VESSL_INLINE channels toMono() const;
-
-      VESSL_INLINE T& value() { return samples[0]; }
-      VESSL_INLINE const T& value() const { return samples[0]; }
-    };
-
-    template<typename T>
-    struct channels<T, 2> : array<T>
-    {
-      T samples[2];
-
-      VESSL_INLINE channels() : array<T>(samples, 2) { samples[0] =  T(0LL); samples[1] = T(0LL); }
-      VESSL_INLINE explicit channels(T m) : array<T>(samples, 2) { samples[0] = m; samples[1] = m; }
-      VESSL_INLINE channels(T left, T right) : array<T>(samples, 2) { samples[0] = left, samples[1] = right; }
-      VESSL_INLINE channels(const channels& other) : array<T>(samples, 2) { samples[0] = other.samples[0]; samples[1] = other.samples[1]; }
-      VESSL_INLINE channels(channels&& other) noexcept : array<T>(samples, 2) { samples[0] = std::move(other.samples[0]); samples[1] = std::move(other.samples[1]); }
-      VESSL_INLINE ~channels() = default;
-      
-      VESSL_INLINE channels& operator=(const channels& other)  // NOLINT(bugprone-unhandled-self-assignment)
-      {
-        if (this == &other)
-        {
-          return *this;
-        }
-        
-        samples[0] = other.samples[0];
-        samples[1] = other.samples[1];
-        return *this;
-      }
-      
-      VESSL_INLINE channels& operator=(channels&& other) noexcept
-      {
-        if (this == &other)
-        {
-          return *this;
-        }
-        
-        samples[0] = std::move(other.samples[0]);
-        samples[1] = std::move(other.samples[1]);
-        return *this;
-      }
-      
-      VESSL_INLINE channels<T, 1> toMono() const { return channels<T, 1>((samples[0] + samples[1]) * 0.5f); }
-    
-      VESSL_INLINE T& left() { return samples[0]; }
-      VESSL_INLINE const T& left() const { return samples[0]; }
-      VESSL_INLINE T& right() { return samples[1]; }
-      VESSL_INLINE const T& right() const { return samples[1]; }
+      channels<T, 1> toMono() const;
+      matrix<T> toMatrix() const;
     };
 
     template<typename T, size_t N>
-    VESSL_INLINE constexpr channels<T, N> operator+(channels<T,N> lhs, const channels<T,N>& rhs)
-    {
-      channels<T, N> result;
-      lhs.add(rhs, result);
-      return result;
-    }
+    VESSL_INLINE constexpr channels<T, N> operator+(channels<T,N> lhs, const channels<T,N>& rhs);
 
     template<typename T, size_t N>
-    VESSL_INLINE constexpr channels<T, N> operator-(channels<T,N> lhs, const channels<T,N>& rhs)
-    {
-      channels<T, N> result;
-      lhs.subtract(rhs, result);
-      return result;
-    }
+    VESSL_INLINE constexpr channels<T, N> operator-(channels<T,N> lhs, const channels<T,N>& rhs);
 
     template<typename T, size_t N>
-    VESSL_INLINE constexpr channels<T, N> operator*(channels<T, N> lhs, const channels<T,N>& rhs)
-    {
-      channels<T, N> result;
-      lhs.multiply(rhs, result);
-      return result;
-    }
+    VESSL_INLINE constexpr channels<T, N> operator*(channels<T, N> lhs, const channels<T,N>& rhs);
 
     template<typename T, size_t N>
-    VESSL_INLINE constexpr channels<T, N> operator*(channels<T, N> lhs, const analog_t& rhs)
-    {
-      channels<T, N> result;
-      lhs.scale(rhs, result);
-      return result;
-    }
+    VESSL_INLINE constexpr channels<T, N> operator*(channels<T, N> lhs, const T& rhs);
 
     template<typename T, size_t N>
-    VESSL_INLINE constexpr channels<T, N> operator*(analog_t lhs, const channels<T, N>& rhs)
-    {
-      channels<T, N> result;
-      rhs.scale(lhs, result);
-      return result;
-    }
+    VESSL_INLINE constexpr channels<T, N> operator*(T lhs, const channels<T, N>& rhs);
 
     template<typename T, size_t N>
-    VESSL_INLINE constexpr channels<T, N> operator^(channels<T, N> lhs, const channels<T,N>& rhs)
-    {
-      channels<T, N> result;
-      for (size_t i = 0; i < N; ++i)
-      {
-        result[i] = cast<digital_t>(lhs[i]) ^ cast<digital_t>(rhs[i]);
-      }
-      return result;
-    }
+    VESSL_INLINE constexpr channels<T, N> operator^(channels<T, N> lhs, const channels<T,N>& rhs);
   }
   
   // for the most part these resolve to standard math calls,
@@ -791,7 +602,7 @@ namespace vessl
     analog_t toSeconds(analog_t sampleRate) const { return samples/sampleRate; }
   };
 
-  template<typename T, typename F = T>
+  template<typename I, typename O = I>
   class processor
   {
   public:
@@ -802,9 +613,9 @@ namespace vessl
     processor& operator=(const processor&) = delete;
     processor& operator=(processor&&) = delete;
 
-    virtual T process(const F& in) = 0;
-    virtual void process(source<F>& in, sink<T>& out);
-    virtual void process(array<F> in, array<T> out);
+    virtual O process(const I& in) = 0;
+    virtual void process(source<I>& in, sink<O>& out);
+    virtual void process(array<I> in, array<O> out);
   };
   
   template<typename T>
@@ -851,7 +662,7 @@ namespace vessl
   procStream<T> operator>>(source<T>& in, processor<T>& proc) { return procStream<T>(proc, in); }
   
   template<typename T>
-  class transform33 : public processor<vector3<T>>
+  class transform33 : public processor<frame::channels<T,3>>
   {
     T data[3 * 3];
     matrix<T> mtrx;
@@ -885,13 +696,13 @@ namespace vessl
         cast<phase_t>(rollRadians / math::twoPi<analog_t>()));
     }
     
-    [[nodiscard]] VESSL_INLINE vector3<T> process(const vector3<T>& input) override
+    [[nodiscard]] VESSL_INLINE frame::channels<T,3> process(const frame::channels<T,3>& input) override
     {
-      vector3<T> output;
+      frame::channels<T,3> output;
 
-      output.x = mtrx[0][0] * input.x + mtrx[0][1] * input.y + mtrx[0][2] * input.z;
-      output.y = mtrx[1][0] * input.x + mtrx[1][1] * input.y + mtrx[1][2] * input.z;
-      output.z = mtrx[2][0] * input.x + mtrx[2][1] * input.y + mtrx[2][2] * input.z;
+      output[0] = mtrx[0][0] * input[0] + mtrx[0][1] * input[1] + mtrx[0][2] * input[2];
+      output[1] = mtrx[1][0] * input[0] + mtrx[1][1] * input[1] + mtrx[1][2] * input[2];
+      output[2] = mtrx[2][0] * input[0] + mtrx[2][1] * input[1] + mtrx[2][2] * input[2];
 
       // this might be faster?
       //mtrx.multiply(input.toMatrix(), output.toMatrix());
@@ -1219,11 +1030,11 @@ namespace vessl
     explicit unitGenerator() : unit(), generator<T>() {}
   };
 
-  template<typename T, typename F = T>
-  class unitProcessor : public unit, public processor<T,F>
+  template<typename I, typename O = I>
+  class unitProcessor : public unit, public processor<I,O>
   {
   protected:
-    explicit unitProcessor() : unit(), processor<T,F>() {}
+    explicit unitProcessor() : unit(), processor<I,O>() {}
   };
 
   namespace interpolation
@@ -2438,6 +2249,7 @@ namespace vessl
 #endif
 
 #include "vessl_qmath.inl"
+#include "vessl_frame.inl"
 
 namespace vessl
 {
@@ -2456,8 +2268,8 @@ namespace vessl
     }
   }
   
-  template<typename T, typename F>
-  void processor<T,F>::process(source<F>& in, sink<T>& out)
+  template<typename I, typename O>
+  void processor<I,O>::process(source<I>& in, sink<O>& out)
   {
     while (in && out)
     {
@@ -2465,8 +2277,8 @@ namespace vessl
     }
   }
 
-  template<typename T, typename F>
-  void processor<T,F>::process(array<F> in, array<T> out)
+  template<typename I, typename O>
+  void processor<I,O>::process(array<I> in, array<O> out)
   {
     auto r = in.getReader();
     auto w = out.getWriter();
@@ -2640,23 +2452,6 @@ namespace vessl
     }
     return dest;
   }
-
-  template <typename T>
-  T vector3<T>::getMagnitude() const
-  {
-    return math::sqrt(x*x + y*y + z*z);
-  }
-
-  template <typename T>
-  void vector3<T>::setSpherical(T radius, analog_t inclination, analog_t azimuth)
-  {
-    x = radius * math::cos<T>(azimuth) * math::sin<T>(inclination);
-    y = radius * math::sin<T>(azimuth) * math::sin<T>(inclination);
-    z = radius * math::cos<T>(inclination);
-  }
-
-  template<typename T>
-  frame::channels<T, 1> frame::channels<T, 1>::toMono() const { return channels(samples[0]); }
 
   template<typename T>
   typename array<T>::writer& operator<<(typename array<T>::writer& w, const T& v)
@@ -3152,7 +2947,7 @@ namespace vessl
   {
     typename W::SampleType val = waveform.evaluate(phase + params.pm.value);
     analog_t f = params.fHz.value * math::exp2(params.fmExp.value) + params.fmLin.value;
-    phase += (phase_t)(dt * f);
+    phase += static_cast<phase_t>(dt * f);
     return val;
   }
 
@@ -3160,7 +2955,7 @@ namespace vessl
   inline void oscil<W>::generate(sink<T>& dest)
   {
     analog_t f = params.fHz.value * math::exp2(params.fmExp.value) + params.fmLin.value;
-    phase_t pInc = (phase_t)(dt * f);
+    phase_t pInc = static_cast<phase_t>(dt * f);
     while(!dest.isFull())
     {
       dest << waveform.evaluate(phase + params.pm.value);

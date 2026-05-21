@@ -6,7 +6,7 @@ namespace frame
 {
 
 template <typename T, size_t N>
-channels<T, 1> channels<T, N>::toMono() const
+channels<T, 1> channels<T, N>::to_mono() const
 {
   T sum = 0;
   for (size_t c = 0; c < N; ++c)
@@ -17,9 +17,9 @@ channels<T, 1> channels<T, N>::toMono() const
 }
 
 template <typename T, size_t N>
-matrix<T> channels<T, N>::toMatrix() const
+math::matrix<T> channels<T, N>::as_matrix() const
 {
-  return matrix<T>(const_cast<T*>(samples), N, 1);
+  return math::matrix<T>(const_cast<T*>(samples), N, 1);
 }
 
 template<typename T, size_t N>
@@ -106,8 +106,8 @@ struct channels<T, 1> : array<T>
     return *this;
   }
   
-  VESSL_INLINE channels toMono() const { return channels(samples[0]); }
-  VESSL_INLINE matrix<T> toMatrix() const { return matrix<T>(samples, 1, 1); }
+  VESSL_INLINE channels to_mono() const { return channels(samples[0]); }
+  VESSL_INLINE math::matrix<T> as_matrix() const { return matrix<T>(samples, 1, 1); }
 
   VESSL_INLINE T& value() { return samples[0]; }
   VESSL_INLINE const T& value() const { return samples[0]; }
@@ -149,8 +149,8 @@ struct channels<T, 2> : array<T>
     return *this;
   }
   
-  VESSL_INLINE channels<T, 1> toMono() const { return channels<T, 1>((samples[0] + samples[1]) * 0.5f); }
-  VESSL_INLINE matrix<T> toMatrix() const { return matrix<T>(samples, 2, 1); }
+  VESSL_INLINE channels<T, 1> to_mono() const { return channels<T, 1>((samples[0] + samples[1]) * 0.5f); }
+  VESSL_INLINE math::matrix<T> as_matrix() const { return matrix<T>(samples, 2, 1); }
 
   VESSL_INLINE T& left() { return samples[0]; }
   VESSL_INLINE const T& left() const { return samples[0]; }
@@ -196,8 +196,8 @@ struct channels<T, 3> : array<T>
     return *this;
   }
     
-  VESSL_INLINE channels<T, 1> toMono() const { return channels<T, 1>((samples[0] + samples[1] + samples[2]) / T(3)); }
-  VESSL_INLINE matrix<T> toMatrix() const { return matrix<T>(samples, 3, 1); }
+  VESSL_INLINE channels<T, 1> to_mono() const { return channels<T, 1>((samples[0] + samples[1] + samples[2]) / T(3)); }
+  VESSL_INLINE math::matrix<T> as_matrix() const { return matrix<T>(samples, 3, 1); }
   
   VESSL_INLINE T& left() { return samples[0]; }
   VESSL_INLINE const T& left() const { return samples[0]; }

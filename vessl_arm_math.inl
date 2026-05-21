@@ -32,10 +32,10 @@
 namespace vessl
 {
   template<>
-  inline void array<float32_t>::copyTo(array dest)
+  inline void array<float32_t>::copy_to(array dest)
   {
-    VASSERT(this->getSize() <= dest.getSize(), "Not enough room in destination for this array");
-    arm_copy_f32(data, dest.getData(), this->getSize());
+    VASSERT(this->size() <= dest.size(), "Not enough room in destination for this array");
+    arm_copy_f32(data_, dest.data(), this->size());
   }
 
   template<>

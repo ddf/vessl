@@ -92,19 +92,19 @@ namespace vessl
     template<>
     [[nodiscard]] VESSL_INLINE q31 cos<q31, phase_t>(phase_t phase) 
     { 
-      return sin<q31>(phase + PHASE_90);
+      return sin<q31>(phase + phase_90);
     }
 
     template<>
     [[nodiscard]] VESSL_INLINE q31 sin<q31, analog_t>(analog_t radians) 
     { 
-      return sin<q31>(cast<phase_t>(radians / twoPi<analog_t>()));
+      return sin<q31>(cast<phase_t>(radians / two_pi<analog_t>()));
     }
 
     template<>
     [[nodiscard]] VESSL_INLINE q31 cos<q31, analog_t>(analog_t radians) 
     { 
-      return cos<q31>(cast<phase_t>(radians / twoPi<analog_t>()));
+      return cos<q31>(cast<phase_t>(radians / two_pi<analog_t>()));
     }
   }
 
@@ -113,8 +113,8 @@ namespace vessl
     template<>
     [[nodiscard]] VESSL_INLINE q31 lerpp<q31>(q31 begin, q31 end, phase_t t)
     {
-      return t == PHASE_ZERO ? begin 
-          : t == PHASE_360 ? end 
+      return t == phase_zero ? begin 
+          : t == phase_360 ? end 
           : begin + (end-begin)*cast<q31>(t);
     }
   }

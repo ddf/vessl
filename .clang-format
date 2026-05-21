@@ -3,20 +3,9 @@ UseTab: Never
 IndentWidth: 2
 TabWidth: 2
 BreakBeforeBraces: Allman
-AllowShortIfStatementsOnASingleLine: false
+AllowShortIfStatementsOnASingleLine: Never
 IndentCaseLabels: false
-ColumnLimit: 0
+ColumnLimit: 120
 AccessModifierOffset: -4
 NamespaceIndentation: None
 FixNamespaceComments: false
-IncludeCategories:
-  - Regex:           '^<([a-zA-Z0-9_.]+)>'
-    Priority:        1
-  - Regex:           '^"(pico)/'
-    Priority:        2
-  - Regex:           '^"(hardware)/'
-    Priority:        3
-  - Regex:           '^"(common)/'
-    Priority:        4
-  - Regex:           '.*'
-    Priority:        5

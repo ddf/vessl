@@ -285,7 +285,7 @@ namespace vessl
     [[nodiscard]] VESSL_INLINE writer make_writer() { return writer(*this); }
 
     // block copy this array to dest, which must be large enough to hold this array.
-    void copy_to(array dest);
+    void copy_to(array dest) const;
 
     void fill(T value);
     
@@ -519,9 +519,10 @@ namespace vessl
       static gain from_decibels(analog_t db) { return gain(db); }
 
       // implement casting operators so that gain can be used as a parameter type.
-      explicit operator binary_t() const { return db >= 0; }
+      explicit operator binary_t() const  { return db >= 0; }
       explicit operator digital_t() const { return cast<digital_t>(db); }
-      explicit operator analog_t() const { return db; }
+      explicit operator analog_t() const  { return db; }
+      explicit operator phase_t() const   { return cast<phase_t>(to_scale()); }
 
       analog_t to_scale() const { return decibels_to_scale(db); }
       analog_t to_decibels() const { return db; }
@@ -545,10 +546,10 @@ namespace vessl
       explicit operator digital_t() const { return cast<digital_t>(samples); }
       explicit operator analog_t() const { return samples;}
 
-      static duration from_bpm(analog_t bpm, analog_t sampleRate) { return duration(sampleRate/(bpm*b_to_f)); }
-      static duration from_seconds(analog_t seconds, analog_t sampleRate) { return duration(sampleRate*seconds); }
-      analog_t to_bpm(analog_t sample_rate) const { return f_to_b*(sample_rate/samples); }
-      analog_t to_seconds(analog_t sample_rate) const { return samples/sample_rate; }
+      static duration from_bpm(analog_t bpm, analog_t sample_rate) { return duration(sample_rate/(bpm*b_to_f)); }
+      static duration from_seconds(analog_t seconds, analog_t sample_rate) { return duration(sample_rate*seconds); }
+      [[nodiscard]] analog_t to_bpm(analog_t sample_rate) const { return f_to_b*(sample_rate/samples); }
+      [[nodiscard]] analog_t to_seconds(analog_t sample_rate) const { return samples/sample_rate; }
     };
   }
 
@@ -759,11 +760,19 @@ namespace vessl
       analog = 3, // floating point values (analog_t)
       phase = 4, // phase_t values
       // space for more built-ins
+      
+      // note to self: additional built-ins should not be structs or classes
+      // doing so means that if a user of the library wants to use an enum as a parameter,
+      // they will need to specialize the cast function to provide a conversion from all
+      // struct/class built-ins to their enum type, otherwise they will get a confusing compilation error.
 
       // user provided type, stored as a void*, must be convertible to all other parameter types.
       // even if the conversion is meaningless.
-      user = UINT8_MAX 
+      user = UINT8_MAX
     };
+    
+    template<typename T>
+    static constexpr value_type type_of() { return value_type::user; }
     
     typedef uint32_t id_t;
     
@@ -773,7 +782,8 @@ namespace vessl
       id_t          id;
       value_type    type;
       
-      VESSL_INLINE static desc empty() { return {"", 0, value_type::none}; }
+      VESSL_INLINE constexpr desc(const char_t* n, id_t i, value_type t) : name(n), id(i), type(t) {}
+      VESSL_INLINE static constexpr desc empty() { return {"", 0, value_type::none}; }
     };
     
     template<size_t N>
@@ -799,18 +809,17 @@ namespace vessl
     struct data
     {
       T value = T(0);
-      static constexpr auto type = value_type::user;
     };
     
     template<typename T>
-    parameter(const desc& param_desc, const data<T>& param_data) : desc_(param_desc), data_(&const_cast<data<T>&>(param_data).value) {}
+    constexpr parameter(const desc& param_desc, const data<T>& param_data) : desc_(param_desc), data_(&const_cast<data<T>&>(param_data).value) {}
       
     // explicitly declared copy-constructors so that they will be used instead of the copy-assignment override
     // when returning parameter objects by value (as in plist::element_at implementations)
     constexpr parameter(parameter& param) : desc_(param.desc_), data_(param.data_) {};
     constexpr parameter(const parameter& param) : desc_(param.desc_), data_(const_cast<void*>(param.data_)) {};
     
-    [[nodiscard]] VESSL_INLINE const desc& description() const { return desc_; }
+    [[nodiscard]] VESSL_INLINE constexpr const desc& description() const { return desc_; }
     
     template<typename T>
     VESSL_INLINE T read() const
@@ -828,10 +837,10 @@ namespace vessl
       return *static_cast<T*>(data_);
     }
 
-    VESSL_INLINE binary_t  read_binary()  const { return read<binary_t>(); }
-    VESSL_INLINE digital_t read_digital() const { return read<digital_t>(); }
-    VESSL_INLINE analog_t  read_analog()  const { return read<analog_t>(); }
-    VESSL_INLINE phase_t   read_phase()   const { return read<phase_t>(); }
+    VESSL_INLINE binary_t   read_binary()  const { return read<binary_t>(); }
+    VESSL_INLINE digital_t  read_digital() const { return read<digital_t>(); }
+    VESSL_INLINE analog_t   read_analog()  const { return read<analog_t>(); }
+    VESSL_INLINE phase_t    read_phase()   const { return read<phase_t>(); }
     
     VESSL_INLINE explicit operator binary_t()  const { return read<binary_t>(); }
     VESSL_INLINE explicit operator digital_t() const { return read<digital_t>(); }
@@ -910,70 +919,76 @@ namespace vessl
     static constexpr size_t num = N;
     VESSL_INLINE size_t size() const override { return N; }
   };
+
+  template<>
+  VESSL_INLINE constexpr parameter::value_type parameter::type_of<void*>() { return value_type::none; }
+
+  template<>
+  VESSL_INLINE constexpr parameter::value_type parameter::type_of<analog_t>() { return value_type::analog; }
+
+  template<>
+  VESSL_INLINE constexpr parameter::value_type parameter::type_of<digital_t>() { return value_type::digital; }
+
+  template<>
+  VESSL_INLINE constexpr parameter::value_type parameter::type_of<phase_t>() { return value_type::phase; }
   
   template<>
   struct parameter::data<void*>
   {
     void* value = nullptr;
-    static constexpr auto type = value_type::none;
   };
   
   template<>
   struct parameter::data<analog_t>
   {
     analog_t value = 0.f;
-    static constexpr auto type = value_type::analog;
   };
   
   template<>
   struct parameter::data<digital_t>
   {
     digital_t value = 0;
-    static constexpr auto type = value_type::digital;
   };
   
   template<>
   struct parameter::data<binary_t>
   {
     binary_t value = false;
-    static constexpr auto type = value_type::binary;
   };
   
   template<>
   struct parameter::data<phase_t>
   {
     phase_t value = phase_zero;
-    static constexpr auto type = value_type::phase;
   };
-  
+
   template<>
   struct parameter::data<gain_t>
   {
     gain_t value = gain_t();
-    // @todo add a gain type
-    static constexpr auto type = value_type::user;
   };
-  
+
   template<>
   struct parameter::data<duration_t>
   {
     duration_t value = duration_t();
-    // @todo add a duration type
-    static constexpr auto type = value_type::user;
   };
   
   template<typename T>
   struct param : parameter::data<T>
   {
-    parameter operator()(const parameter::desc& d) const { return parameter(d, *this); }
+    constexpr parameter operator()(const char_t* name, parameter::id_t id) const
+    {
+      return parameter(parameter::desc(name, id, parameter::type_of<T>()), *this);
+    }
   };
   
-  typedef param<analog_t>     analog_p;
-  typedef param<digital_t>    digital_p;
-  typedef param<binary_t>     binary_p;
-  typedef param<phase_t>      phase_p;
-  typedef param<gain_t>       gain_p;
-  typedef param<duration_t>   duration_p;
+  typedef param<analog_t>    analog_p;
+  typedef param<digital_t>   digital_p;
+  typedef param<binary_t>    binary_p;
+  typedef param<phase_t>     phase_p;
+  typedef param<gain_t>      gain_p;
+  typedef param<duration_t>  duration_p;
 
   VESSL_INLINE parameter parameter::none() { data<void*> v; return parameter(desc::empty(), v); }
   
@@ -1264,6 +1279,19 @@ namespace vessl
   
   namespace filtering
   {
+    // common filter Q values for biquad filters
+    namespace q
+    {
+      template<typename T>
+      constexpr T butterworth() { return cast<T>(0.70710678118); } // 1/sqrt(2)
+
+      template<typename T>
+      constexpr T sallen_key() { return cast<T>(0.5); } 
+
+      template<typename T>
+      constexpr T bessel() { return cast<T>(0.57735026919); } // 1/sqrt(3)
+    }
+  
     struct args
     {
       analog_t sr;
@@ -1298,19 +1326,6 @@ namespace vessl
       }
     };
     
-    // common filter Q values for biquad filters
-    namespace q
-    {
-      template<typename T>
-      constexpr T butterworth() { return cast<T>(0.70710678118); } // 1/sqrt(2)
-
-      template<typename T>
-      constexpr T sallen_key() { return cast<T>(0.5); } 
-
-      template<typename T>
-      constexpr T bessel() { return cast<T>(0.57735026919); } // 1/sqrt(3)
-    }
-    
     template<typename T>
     struct data
     {
@@ -1328,15 +1343,13 @@ namespace vessl
     {
       static constexpr size_t coeff_num = 5;
       
-      template<typename T, size_t STATES>
+      template<typename T, size_t States>
       struct cascade : data<T>
       {
-      public:
-        cascade() : data<T>(co_, coeff_num * Stages, st_, STATES * Stages), co_{} {}
+        cascade() : data<T>(co, coeff_num * Stages, st, States * Stages), co{} {}
         
-      private:
-        analog_t co_[coeff_num*Stages];
-        T st_[STATES*Stages];
+        analog_t co[coeff_num*Stages];
+        T st[States*Stages];
       };
       
       template<typename T, class CoGen>
@@ -1345,14 +1358,12 @@ namespace vessl
       {
         using cascade<T, 2>::coeff;
         using cascade<T, 2>::state;
-        using cascade<T, 2>::getCoeffSize;
-        using cascade<T, 2>::getStateSize;
         
         static CoGen cg;
          
         void process(const T* source, T* dest, size_t block_size, const args& args);
         // ReSharper disable once CppMemberFunctionMayBeStatic
-        size_t stage_count() const { return Stages; }
+        [[nodiscard]] size_t stage_count() const { return Stages; }
       };
 
       template<typename T>
@@ -1572,7 +1583,7 @@ namespace vessl
     void set_sample_rate(float sample_rate) override { dt_ = 1.0f / sample_rate;}
     const parameter_list& parameters() const override { return *this; }
 
-    parameter rate() const { return params_.rate({ "rate", 'r', analog_p::type }); }
+    parameter rate() const { return params_.rate("rate", 'r'); }
 
     // generates stepped noise in the range [0,1] at the given rate
     T generate() override;
@@ -1614,12 +1625,12 @@ namespace vessl
     const parameter_list& parameters() const override { return *this; }
 
     // ins
-    parameter from() const { return params_.from({ "from", 'f', param<T>::type }); }
-    parameter to() const { return params_.to({ "to", 't', param<T>::type }); }
-    parameter duration() const { return params_.duration({ "duration", 'd', analog_p::type }); }
+    parameter from() const { return params_.from("from", 'f'); }
+    parameter to() const { return params_.to("to", 't'); }
+    parameter duration() const { return params_.duration("duration", 'd'); }
 
     // outs
-    parameter eor() const { return params_.eor({ "eor", 'e', binary_p::type }); }
+    parameter eor() const { return params_.eor("eor", 'e'); }
     // could also add t as an out.
 
     binary_t is_active() const { return !params_.eor.value; }
@@ -1660,12 +1671,12 @@ namespace vessl
       void set_sample_rate(float sample_rate) override { dt_ = 1.0f / sample_rate;}
       const parameter_list& parameters() const override { return *this; }
 
-      parameter target() const { return params_.target({ "target", 't', analog_p::type }); }
-      parameter duration() const { return params_.duration({ "duration", 'd', analog_p::type }); }
-      parameter active() const { return params_.active({ "active", 'a', binary_p::type }); }
-      parameter eos() const { return params_.eos({ "eos", 'e', binary_p::type }); }
+      parameter target() const { return params_.target("target", 't'); }
+      parameter duration() const { return params_.duration("duration", 'd'); }
+      parameter active() const { return params_.active("active", 'a'); }
+      parameter eos() const { return params_.eos("eos", 'e'); }
       // current value of the stage
-      parameter value() const { return params_.output({ "value", 'v', analog_p::type }); }
+      parameter value() const { return params_.output("value", 'v'); }
 
       void start(T from_value) { begin_ = from_value; params_.output.value = from_value; time_ = -dt_; params_.active.value = true; params_.eos.value = false; }
       void reset() { params_.active.value = false; params_.eos.value = false; time_ = -dt_; params_.output.value = 0; }
@@ -1713,7 +1724,7 @@ namespace vessl
     const parameter_list& parameters() const override { return *this; }
 
     parameter value() const { return current_stage().value(); }
-    parameter eoc() const { return params_.eoc({ "eoc", 'e', binary_p::type }); }
+    parameter eoc() const { return params_.eoc("eoc", 'e'); }
 
     // make this a parameter we check in generate?
     virtual void trigger();
@@ -1756,7 +1767,7 @@ namespace vessl
     }
     
     typename envelope<T>::stage& attack() { return attack_stage_; }
-    typename envelope<T>::stage& decay() { return envelope<T>::finalStage(); }
+    typename envelope<T>::stage& decay() { return envelope<T>::final_stage(); }
     using envelope<T>::eoc;
 
     using envelope<T>::trigger;
@@ -1779,7 +1790,7 @@ namespace vessl
     {}
 
     using ad<T>::attack;
-    typename envelope<T>::stage& release() { return envelope<T>::finalStage(); }
+    typename envelope<T>::stage& release() { return envelope<T>::final_stage(); }
     using ad<T>::eoc; 
 
     void gate(T value);
@@ -1790,7 +1801,7 @@ namespace vessl
   protected:
     binary_t should_advance(size_t current_stage_idx) override
     {
-      return ad<T>::shouldAdvance(current_stage_idx) && !gate_on_;
+      return ad<T>::should_advance(current_stage_idx) && !gate_on_;
     }
     
   private:
@@ -1810,7 +1821,7 @@ namespace vessl
       attack_stage_.target() = T(1);
       decay_stage_.duration() = decay_duration;
       decay_stage_.target() = sustain_level;
-      envelope<T>::finalStage().duration() = release_duration;
+      envelope<T>::final_stage().duration() = release_duration;
     }
 
     typename envelope<T>::stage& attack() { return attack_stage_; }
@@ -1838,7 +1849,7 @@ namespace vessl
   protected:
     binary_t should_advance(size_t current_stage_idx) override
     {
-      return current_stage_idx == 1 ? decay_stage_.eos() && !gate_on_ : envelope<T>::shouldAdvance(current_stage_idx);
+      return current_stage_idx == 1 ? decay_stage_.eos() && !gate_on_ : envelope<T>::should_advance(current_stage_idx);
     }
     
   private:
@@ -1862,11 +1873,11 @@ namespace vessl
     void set_sample_rate(float sample_rate) override { dt_ = 1.0f / sample_rate; }
     const parameter_list& parameters() const override { return *this; }
 
-    parameter rise() const { return params_.rise({ "rise", 'a', analog_p::type }); }
-    parameter fall() const { return params_.fall({ "fall", 'd', analog_p::type }); }
-    parameter rising() const { return params_.rising({ "rising", 'r', binary_p::type }); }
-    parameter falling() const { return params_.falling({ "falling", 'f', binary_p::type }); }
-    parameter value() const { return params_.output({ "value", 'v', param<T>::type }); }
+    parameter rise() const { return params_.rise("rise", 'a'); }
+    parameter fall() const { return params_.fall("fall", 'd'); }
+    parameter rising() const { return params_.rising("rising", 'r'); }
+    parameter falling() const { return params_.falling("falling", 'f'); }
+    parameter value() const { return params_.output("value", 'v'); }
     
     T process(const T& v) override;
     using processor<T>::process;
@@ -1899,25 +1910,27 @@ namespace vessl
     W waveform;
     using sample_t = typename W::sample_t;
     
-    oscil() : unit_generator<sample_t>(), phase_(phase_zero), dt_(phase_zero) { params_.fHz.value = 440.0; }
+    oscil() : unit_generator<sample_t>(), phase_(phase_zero), dt_(phase_zero) { params_.fhz.value = 440.0; }
 
     template<typename... Ts>
     explicit oscil(analog_t sample_rate, analog_t freq_in_hz, Ts... wargs)
     : unit_generator<sample_t>(), waveform(wargs...), phase_(phase_zero), dt_(cast<phase_t>(1.0f/sample_rate))
-    { params_.fHz.value = freq_in_hz; }
+    {
+      params_.fhz.value = freq_in_hz;
+    }
     
     void set_sample_rate(float sample_rate) override { dt_ = cast<phase_t>(1.0f/sample_rate); }
     
     [[nodiscard]] const parameter_list& parameters() const override { return *this; }
     
     // frequency in Hz without FM applied
-    [[nodiscard]] parameter fhz() const { return params_.fHz({ "frequency", 'f', analog_p::type }); }
+    [[nodiscard]] parameter fhz() const { return params_.fhz("frequency", 'f'); }
     // linear frequency modulation
-    [[nodiscard]] parameter fm_lin() const { return params_.fmLin({ "fm (lin)", 'l', analog_p::type }); }
+    [[nodiscard]] parameter fm_lin() const { return params_.fm_lin("fm (lin)", 'l'); }
     // v/oct (exponential) frequency modulation
-    [[nodiscard]] parameter fm_exp() const { return params_.fmExp({ "fm (v/oct)", 'v', analog_p::type }); }
+    [[nodiscard]] parameter fm_exp() const { return params_.fm_exp("fm (v/oct)", 'v'); }
     // phase modulation
-    [[nodiscard]] parameter pm() const { return params_.pm({ "phase mod", 'p', phase_p::type }); }
+    [[nodiscard]] parameter pm() const { return params_.pm("phase mod", 'p'); }
 
     sample_t generate() override;
     void generate(sink<sample_t>& dest);
@@ -1973,7 +1986,7 @@ namespace vessl
   {
   public:
     delay(array<T> delay_buffer, analog_t sample_rate, analog_t delay_in_seconds = 0, analog_t feedback_amount = 0)
-    : unit_processor<T>(), buffer_(delay_buffer.getData(), delay_buffer.size()), dt_(1.0f/sample_rate)
+    : unit_processor<T>(), buffer_(delay_buffer.data(), delay_buffer.size()), dt_(1.0f/sample_rate)
     {
       params_.time.value = duration_t::from_seconds(delay_in_seconds, sample_rate);
       delay_in_samples_ = params_.time.value.samples;
@@ -1987,9 +2000,9 @@ namespace vessl
     const delay_line<T>& buffer() const { return buffer_; }
 
     /// delay time expressed as vessl::duration (i.e. samples), can be set using an analog_t
-    parameter time() const { return params_.time({ "time", 't', duration_p::type }); }
+    parameter time() const { return params_.time("time", 't'); }
     /// amount of signal to feedback, can be negative to invert feedback signal, clamped [-1,1]
-    parameter feedback() const { return params_.feedback({ "feedback", 'f', analog_p::type }); }
+    parameter feedback() const { return params_.feedback("feedback", 'f'); }
     
     T process(const T& in) override;
 
@@ -2032,7 +2045,7 @@ namespace vessl
     void set_sample_rate(float sample_rate) override { delta_ = math::exp(-1.0 / (sample_rate*params_.response.value)); }
     const parameter_list& parameters() const override { return *this; }
     
-    parameter response() const { return params_.response({ "response time", 'r', analog_p::type }); }
+    parameter response() const { return params_.response("response time", 'r'); }
 
     T process(const T& in) override;
 
@@ -2071,31 +2084,31 @@ namespace vessl
   class freeze : public unit, public processor<T>, public generator<T>, protected plist<4>
   {
   public:
-    explicit freeze(array<T> freeze_buffer, float sample_rate) : unit()
-    , delay_line_(freeze_buffer.getData(), freeze_buffer.size())
+    explicit freeze(array<T> freeze_buffer, analog_t sample_rate) : unit()
+    , delay_line_(freeze_buffer.data(), freeze_buffer.size())
     , phase_(0), crossfade_(0.75f)
     , freeze_delay_(0), freeze_size_(0)
-    , read_rate_(1), dt_(1.0/sample_rate)
+    , read_rate_(1), dt_(1.0f/sample_rate)
     {
-      params_.size.value.samples = delay_line_.size()-1;
-      freeze_size_ = params_.size.value.samples;
+      params_.duration.value.samples = delay_line_.size()-1;
+      freeze_size_ = params_.duration.value.samples;
       params_.rate.value = 1.0;
     }
     
     void set_sample_rate(analog_t sr) override { dt_ = 1.0f/sr; }
-    const parameter_list& parameters() const override { return *this; }
+    [[nodiscard]] const parameter_list& parameters() const override { return *this; }
     
-    delay_line<T>& get_delay_line() { return delay_line_; }
-    const delay_line<T>& get_delay_line() const { return delay_line_; }
+    delay_line<T>& buffer() { return delay_line_; }
+    const delay_line<T>& buffer() const { return delay_line_; }
     
-    parameter enabled() const { return params_.enabled({ "enabled", 'e', binary_p::type }); }
+    parameter enabled() const { return params_.enabled("enabled", 'e'); }
     // end of the freeze loop in samples relative to the most recently recorded sample
-    parameter position() const { return params_.position({ "position", 'p', analog_p::type }); }
+    parameter position() const { return params_.position("position", 'p'); }
     // size of the freeze loop as a duration (samples).
     // the beginning of the freeze loop, when played forward, will be position + size.
-    parameter duration() const { return params_.size({ "duration", 'd', analog_p::type }); }
+    parameter duration() const { return params_.duration("duration", 'd'); }
     // rate of playback when enabled, can be negative to play in reverse
-    parameter rate() const { return params_.rate({ "rate", 'r', analog_p::type }); }
+    parameter rate() const { return params_.rate("rate", 'r'); }
     // should this be a parameter? there's not much gained by it.
     analog_t phase() const { return phase_; }
     // reset the phase to zero (argument for making it a parameter?)
@@ -2116,7 +2129,7 @@ namespace vessl
   protected:
     parameter element_at(size_t index) const override
     {
-      parameter p[num] = { enabled(), position(), size(), rate() };
+      parameter p[num] = { enabled(), position(), duration(), rate() };
       return p[index];
     }
 
@@ -2161,7 +2174,7 @@ namespace vessl
       , gain_t emphasis = gain_t::from_decibels(0) ) 
     : unit_processor<T>(), sample_rate_(sample_rate)
     {
-      params_.fHz.value = freq_in_hz;
+      params_.fhz.value = freq_in_hz;
       params_.q.value = kyu;
       params_.emphasis.value = emphasis;
     }
@@ -2169,33 +2182,33 @@ namespace vessl
     void set_sample_rate(analog_t sample_rate) override { sample_rate_ = sample_rate; }
     const parameter_list& parameters() const override { return *this; }
 
-    parameter fhz() const { return params_.fhz({ "fHz", 'f', analog_p::type }); }
-    parameter q() const { return params_.q({ "q", 'q', analog_p::type }); }
+    parameter fhz() const { return params_.fhz("fHz", 'f'); }
+    parameter q() const { return params_.q("q", 'q'); }
     // unused by some filter types (see filtering section)
-    parameter emphasis() const { return params_.emphasis({ "emphasis", 'e', analog_p::type }); }
+    parameter emphasis() const { return params_.emphasis("emphasis", 'e'); }
     
     T process(const T& in) override
     {
       T out;
-      filtering::args fargs = {
+      filtering::args fargs(
         sample_rate_,
-        params_.fHz.value,
+        params_.fhz.value,
         math::max(params_.q.value, 0.01),
         params_.emphasis.value
-      };
+      );
       func_.process(&in, &out, 1, fargs);
       return out;
     }
     
     void process(array<T> in, array<T> out) override
     {
-      filtering::args fargs = {
+      filtering::args fargs(
         sample_rate_,
-        params_.fHz.value,
-        math::max(params_.q.value, 0.01),
+        params_.fhz.value,
+        math::max(params_.q.value, 0.01f),
         params_.emphasis.value
-      };
-      func_.process(in.getData(), out.getData(), in.size(), fargs);
+      );
+      func_.process(in.data(), out.data(), in.size(), fargs);
     }
     
   protected:
@@ -2230,9 +2243,9 @@ namespace vessl
     void set_sample_rate(analog_t sampleRate) override { dt_ = 1.0f / sampleRate;}
     const parameter_list& parameters() const override { return *this; }
 
-    parameter rate() const { return params_.bitRate({ "bit rate", 'r', analog_p::type }); }
-    parameter depth() const { return params_.bitDepth({ "bit depth", 'd', analog_p::type }); }
-    parameter mangle() const { return params_.mangle({ "mangle", 'm', binary_p::type }); }
+    parameter rate() const { return params_.bitRate("bit rate", 'r'); }
+    parameter depth() const { return params_.bitDepth("bit depth", 'd'); }
+    parameter mangle() const { return params_.mangle("mangle", 'm'); }
 
     T process(const T& in) override;
 
@@ -2265,14 +2278,14 @@ namespace vessl
   public:
     explicit limiter(gain_t pre_gain = gain_t::from_decibels(0)) : unit_processor<T>()
     {
-      params_.preGain.value = pre_gain;
+      params_.pre_gain.value = pre_gain;
       params_.peak.value = 0.5;
     }
     
     const parameter_list& parameters() const override { return *this; }
 
-    parameter pre_gain() const { return params_.preGain({ "pre-gain", 'g', gain_p::type }); }
-    parameter peak() const { return params_.peak({ "peak", 'k', param<T>::type }); }
+    parameter pre_gain() const { return params_.pre_gain("pre-gain", 'g'); }
+    parameter peak() const { return params_.peak("peak", 'k'); }
 
     T process(const T& in) override;
     using unit_processor<T>::process;
@@ -2361,7 +2374,7 @@ namespace vessl
   }
   
   template<typename T>
-  void array<T>::copy_to(array dest)
+  void array<T>::copy_to(array dest) const
   {
     writer w(dest);
     reader r(*this);
@@ -2979,7 +2992,7 @@ namespace vessl
     {
       s.set_sample_rate(sample_rate);
     }
-    final_.setSampleRate(sample_rate);
+    final_.set_sample_rate(sample_rate);
   }
 
   template<typename T>
@@ -3032,7 +3045,7 @@ namespace vessl
   VESSL_INLINE typename W::sample_t oscil<W>::generate()
   {
     typename W::sample_t val = waveform.evaluate(phase_ + params_.pm.value);
-    analog_t f = params_.fHz.value * math::exp2(params_.fmExp.value) + params_.fmLin.value;
+    analog_t f = params_.fhz.value * math::exp2(params_.fm_exp.value) + params_.fm_lin.value;
     phase_ += static_cast<phase_t>(dt_ * f);
     return val;
   }
@@ -3040,7 +3053,7 @@ namespace vessl
   template <class W>
   VESSL_INLINE void oscil<W>::generate(sink<typename W::sample_t>& dest)
   {
-    analog_t freq = params_.fHz.value * math::exp2(params_.fmExp.value) + params_.fmLin.value;
+    analog_t freq = params_.fHz.value * math::exp2(params_.fm_exp.value) + params_.fm_lin.value;
     phase_t step = static_cast<phase_t>(dt_ * freq);
     while(!dest.isFull())
     {
@@ -3155,7 +3168,7 @@ namespace vessl
   T follow<T>::process(const T& in) 
   {
     writer_.write(in);
-    if (writer_.isFull())
+    if (writer_.is_full())
     {
       previous_ = current_;
       current_ = T(0);
@@ -3165,7 +3178,7 @@ namespace vessl
         current_ *= delta_;
         current_ += (1.0 - delta_)*math::abs(r.read());
       }
-      writer_ = window_.writer();
+      writer_ = window_.make_writer();
     }
 
     analog_t t = 1.0 - cast<analog_t>(writer_.available()) / cast<analog_t>(window_.size());
@@ -3176,7 +3189,7 @@ namespace vessl
   T freeze<T, I>::generate() 
   {
     freeze_delay_ = cast<analog_t>(position());
-    freeze_size_  = params_.size.value.samples;
+    freeze_size_  = params_.duration.value.samples;
     analog_t sampleDelay = freeze_delay_ + (1.0-phase_)*freeze_size_;
     phase_ = math::wrap01(phase_ + rate() / freeze_size_);
     return delay_line_.template read<I>(sampleDelay);
@@ -3223,7 +3236,7 @@ namespace vessl
     if (TimeMode == time::mode::slew)
     {
       analog_t fd = params_.position.value;
-      analog_t fs = params_.size.value.samples;
+      analog_t fs = params_.duration.value.samples;
       analog_t rt = params_.rate.value;
       analog_t st = dt_;
       while (w)
@@ -3256,7 +3269,7 @@ namespace vessl
     if (TimeMode == time::mode::fade)
     {
       analog_t fd0 = freeze_delay_,   fd1 = params_.position.value;
-      analog_t fs0 = freeze_size_,    fs1 = params_.size.value.samples;
+      analog_t fs0 = freeze_size_,    fs1 = params_.duration.value.samples;
       analog_t fade = 0, fadeInc = 1.0 / output.size();
       analog_t r0 = read_rate_, r1 = params_.rate.value;
       analog_t p0 = phase_, dp0 = r0/fs0, dp1 = r1/fs1;
@@ -3316,7 +3329,7 @@ namespace vessl
   template<typename T>
   T limiter<T>::process(const T& in)
   {
-    T pre = in*params_.pre_gain.value.toScale();
+    T pre = in*params_.pre_gain.value.to_scale();
     T peak = math::abs(pre);
     T error = peak - params_.peak.value;
     params_.peak.value += (error > T(0)) ? T(0.05) : T(0.00002) * error;

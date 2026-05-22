@@ -32,64 +32,67 @@
 namespace vessl
 {
   template<>
-  inline void array<float32_t>::copy_to(array dest)
+  inline void array<float32_t>::copy_to(array dest) const
   {
-    VASSERT(this->size() <= dest.size(), "Not enough room in destination for this array");
-    arm_copy_f32(data_, dest.data(), this->size());
+    VASSERT(size_ <= dest.size_, "Not enough room in destination for this array");
+    arm_copy_f32(data_, dest.data_, size_);
   }
 
   template<>
-  inline void array<float32_t>::fill(float value)
+  inline void array<float32_t>::fill(float32_t value)
   {
-    arm_fill_f32(value, data, size);  
+    arm_fill_f32(value, data_, size_);  
   }
   
   template<>
-  inline array<float32_t> array<float32_t>::offset(float value, array dest) const
+  inline array<float32_t> array<float32_t>::offset(float32_t value, array dest) const
   {
-    VASSERT(this->getSize() <= dest.getSize(), "Not enough room in destination for this array");
-    arm_offset_f32(data, value, dest.getData(), this->getSize());
+    VASSERT(size_ <= dest.size_, "Not enough room in destination for this array");
+    arm_offset_f32(data_, value, dest.data_, this->size_);
     return dest;
   }
   
   template<>
   inline array<float32_t> array<float32_t>::add(array other, array dest) const
   {
-    VASSERT(size == other.size && size <= dest.size, "Arrays are different sizes or dest is not large enough.");
-    arm_add_f32(data, other.data, dest.data, size);
+    VASSERT(size_ == other.size_ && size_ <= dest.size_, "Arrays are different sizes or dest is not large enough.");
+    arm_add_f32(data_, other.data_, dest.data_, size_);
     return dest;
   }
 
   template<>
   inline array<float32_t> array<float32_t>::subtract(array other, array dest) const
   {
-    VASSERT(size == other.size && size <= dest.size, "Arrays are different sizes or dest is not large enough.");
-    arm_sub_f32(data, other.data, dest.data, size);
+    VASSERT(size_ == other.size_ && size_ <= dest.size_, "Arrays are different sizes or dest is not large enough.");
+    arm_sub_f32(data_, other.data_, dest.data_, size_);
     return dest;
   }
 
   template<>
   inline array<float32_t> array<float32_t>::scale(float32_t value, array dest) const
   {
-    VASSERT(size <= dest.size, "Destination array is not large enough");
-    arm_scale_f32(data, value, dest.data, size);
+    VASSERT(size_ <= dest.size_, "Destination array is not large enough");
+    arm_scale_f32(data_, value, dest.data_, size_);
     return dest;
   }
 
   template<>
   inline array<float32_t> array<float32_t>::multiply(array other, array dest) const
   {
-    VASSERT(size == other.size && size <= dest.size, "Arrays are different sizes or dest is not large enough.");
-    arm_mult_f32(data, other.data, dest.data, size);
+    VASSERT(size_ == other.size_ && size_ <= dest.size_, "Arrays are different sizes or dest is not large enough.");
+    arm_mult_f32(data_, other.data_, dest.data_, size_);
     return dest;
   }
+
+  namespace math
+  {
   
   template<>
-  struct matrixData<float32_t>
+  struct matrix_data<float32_t>
   {
     arm_matrix_instance_f32 inst;
-    matrixData() { arm_mat_init_f32(&inst, 0, 0, nullptr); };
-    matrixData(float32_t* data, uint32_t r, uint32_t c) { arm_mat_init_f32(&inst, r, c, data); }
+    matrix_data() { arm_mat_init_f32(&inst, 0, 0, nullptr); };
+    matrix_data(float32_t* data, uint32_t r, uint32_t c) { arm_mat_init_f32(&inst, r, c, data); }
     
     float32_t* operator*() { return inst.pData; }
     float32_t* operator*() const { return inst.pData; }
@@ -101,7 +104,7 @@ namespace vessl
   inline matrix<float32_t> matrix<float32_t>::add(matrix other, matrix dest) const
   {
     VASSERT(rows == other.rows && rows == dest.rows && columns == other.columns && colums == dest.columns, "matrices do not have the same dimentions");
-    arm_mat_add_f32(&data.inst, &other.data.inst, &dest.data.inst);
+    arm_mat_add_f32(&data_.inst, &other.data_.inst, &dest.data_.inst);
     return dest;
   }
 
@@ -109,14 +112,14 @@ namespace vessl
   inline matrix<float32_t> matrix<float32_t>::subtract(matrix other, matrix dest) const
   {
     VASSERT(rows == other.rows && rows == dest.rows && columns == other.columns && colums == dest.columns, "matrices do not have the same dimentions");
-    arm_mat_sub_f32(&data.inst, &other.data.inst, &dest.data.inst);
+    arm_mat_sub_f32(&data_.inst, &other.data_.inst, &dest.data_.inst);
     return dest;
   }
   
   template<>
   inline matrix<float32_t> matrix<float32_t>::scale(float32_t value, matrix dest) const
   {
-    arm_mat_scale_f32(&data.inst, value, &dest.data.inst);
+    arm_mat_scale_f32(&data_.inst, value, &dest.data_.inst);
     return dest;
   }
   
@@ -126,7 +129,7 @@ namespace vessl
     VASSERT(getColumns() == other.getRows(), "Incompatible matrix sizes in operands");
     VASSERT(dest.getRows() == getRows(), "Incorrect number of rows in destination");
     VASSERT(dest.getColumns() == other.getColumns(), "Incorrect number of columns in destination");
-    arm_mat_mult_f32(&data.inst, &other.data.inst, &dest.data.inst);
+    arm_mat_mult_f32(&data_.inst, &other.data_.inst, &dest.data_.inst);
     return dest;
   }
   
@@ -139,8 +142,6 @@ namespace vessl
   //   return dest;
   // }
   
-  namespace math
-  {
     template<>
     inline float32_t sin<float32_t, float32_t>(float32_t r) { return arm_sin_f32(r); }
 
@@ -158,27 +159,25 @@ namespace vessl
   
   namespace filtering
   {
-    template<size_t STAGES>
+    template<size_t Stages>
     template<class CoGen>
-    struct biquad<STAGES>::df2T<float, CoGen> final : cascade<float, 2>
+    struct biquad<Stages>::df2t<float32_t, CoGen> final : cascade<float, 2>
     {
       arm_biquad_cascade_df2T_instance_f32 inst;
           
-      using biquad<STAGES>::cascade<float, 2>::coeff;
-      using biquad<STAGES>::cascade<float, 2>::state;
-      using biquad<STAGES>::cascade<float, 2>::getCoeffSize;
-      using biquad<STAGES>::cascade<float, 2>::getStateSize;
+      using biquad<Stages>::cascade<float, 2>::coeff;
+      using biquad<Stages>::cascade<float, 2>::state;
     
       static CoGen cg;
   
-      df2T() { arm_biquad_cascade_df2T_init_f32(&inst, STAGES, coeff.getData(), state.getData()); }
-    
-      size_t getStageCount() const { return STAGES; }
+      df2t() { arm_biquad_cascade_df2T_init_f32(&inst, Stages, coeff.data(), state.data()); }
+
+      [[nodiscard]] size_t get_stage_count() const { return Stages; }
   
-      void process(const float* source, float* dest, size_t blockSize, const args& args)
+      void process(const float* source, float* dest, size_t block_size, const args& args)
       {
-        cg(coeff.getData(), args.omega(), args.q, args.g);
-        arm_biquad_cascade_df2T_f32(&inst, source, dest, blockSize);
+        cg(coeff.data(), args.omega(), args.q, args.g);
+        arm_biquad_cascade_df2T_f32(&inst, source, dest, block_size);
       }
     };
   }

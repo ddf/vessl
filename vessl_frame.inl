@@ -107,7 +107,7 @@ struct channels<T, 1> : array<T>
   }
   
   VESSL_INLINE channels to_mono() const { return channels(samples[0]); }
-  VESSL_INLINE math::matrix<T> as_matrix() const { return matrix<T>(samples, 1, 1); }
+  VESSL_INLINE math::matrix<T> as_matrix() const { return math::matrix<T>(samples, 1, 1); }
 
   VESSL_INLINE T& value() { return samples[0]; }
   VESSL_INLINE const T& value() const { return samples[0]; }
@@ -150,7 +150,7 @@ struct channels<T, 2> : array<T>
   }
   
   VESSL_INLINE channels<T, 1> to_mono() const { return channels<T, 1>((samples[0] + samples[1]) * 0.5f); }
-  VESSL_INLINE math::matrix<T> as_matrix() const { return matrix<T>(samples, 2, 1); }
+  VESSL_INLINE math::matrix<T> as_matrix() const { return math::matrix<T>(samples, 2, 1); }
 
   VESSL_INLINE T& left() { return samples[0]; }
   VESSL_INLINE const T& left() const { return samples[0]; }
@@ -197,7 +197,7 @@ struct channels<T, 3> : array<T>
   }
     
   VESSL_INLINE channels<T, 1> to_mono() const { return channels<T, 1>((samples[0] + samples[1] + samples[2]) / T(3)); }
-  VESSL_INLINE math::matrix<T> as_matrix() const { return matrix<T>(samples, 3, 1); }
+  VESSL_INLINE math::matrix<T> as_matrix() const { return math::matrix<T>(samples, 3, 1); }
   
   VESSL_INLINE T& left() { return samples[0]; }
   VESSL_INLINE const T& left() const { return samples[0]; }

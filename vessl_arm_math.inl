@@ -178,7 +178,7 @@ struct biquad<Stages>::df2t<float32_t, CoGen> final : cascade<float, 2>
 
   VESSL_INLINE void process(const float* source, float* dest, size_t block_size, const args& args)
   {
-    cg(coeff.data(), args.omega(), args.q, args.g);
+    cg(coeff, args.omega(), args.q, args.g);
     arm_biquad_cascade_df2T_f32(&inst, source, dest, block_size);
   }
 };

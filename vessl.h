@@ -1307,25 +1307,25 @@ public:
 template<typename I, typename O>
 typename processor<I,O>::sample operator>>(const parameter& p, processor<I,O>& proc)
 {
-  return processor<I,O>::sample(proc, p.read<I>());
+  return typename processor<I,O>::sample(proc, p.read<I>());
 }
 
 template<typename I, typename O>
 typename processor<I,O>::block operator>>(array<I> in, processor<I,O>& proc)
 {
-  return processor<I,O>::block(proc, in);
+  return typename processor<I,O>::block(proc, in);
 }
 
 template<typename I, typename O>
 typename processor<I,O>::block operator>>(const I& in, processor<I,O>& proc)
 {
-  return processor<I,O>::block(proc, sample::frame<I,1>(in));
+  return typename processor<I,O>::block(proc, sample::frame<I,1>(in));
 }
 
 template<typename I, typename O>
 typename processor<I,O>::stream operator>>(source<I>& in, processor<I,O>& proc)
 {
-  return processor<I,O>::stream<(proc, in);
+  return typename processor<I,O>::stream(proc, in);
 }
 
 template<typename T>

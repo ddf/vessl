@@ -25,7 +25,6 @@ SOFTWARE.
 
 #pragma once
 
-#include "vessl.h"
 #include "vessl_qmath.h"
 #include "vessl_qmath_lut.h"
 
@@ -106,10 +105,7 @@ namespace vessl
     { 
       return cos<q31>(cast<phase_t>(radians / two_pi<analog_t>()));
     }
-  }
-
-  namespace easing
-  {
+  
     template<>
     [[nodiscard]] VESSL_INLINE q31 lerpp<q31>(q31 begin, q31 end, phase_t t)
     {
@@ -117,5 +113,5 @@ namespace vessl
           : t == phase_360 ? end 
           : begin + (end-begin)*cast<q31>(t);
     }
-  }
-}
+  } // namespace math
+} // namespace vessl

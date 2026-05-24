@@ -150,7 +150,7 @@ template<typename T>
 VESSL_INLINE T min(const T& a, const T& b) { return a < b ? a : b; }
 
 template<typename T>
-VESSL_INLINE T mod(T v, T* i) { return ::modf(v, i); }
+T mod(T v, T* i);
 
 template<typename T>
 VESSL_INLINE T pow(T x, T y) { return ::pow(x, y); }
@@ -1257,7 +1257,7 @@ public:
     processor* proc;
     I input;
       
-    sample(processor& processor, I sample) : proc(&processor), input(sample) {}
+    sample(processor& processor, I sample_in) : proc(&processor), input(sample_in) {}
     I& operator>>(O& out) { out = proc->process(input); return out; }
   };
     

@@ -192,6 +192,12 @@ struct lerper<T,phase_t>
   }
 };
 
+template <>
+VESSL_INLINE analog_t mod<analog_t>(analog_t v, analog_t *i)
+{
+  return ::modff(v, i);
+}
+
 template <typename T, typename D>
 VESSL_INLINE T lerp(T begin, T end, D t)
 {

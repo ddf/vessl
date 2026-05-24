@@ -22,7 +22,7 @@ template<typename E>
 VESSL_INLINE T noise<T, N>::generate()
 {
   T s = generate();
-  return math::easing::interp<E>(s, next_, step_);
+  return math::interp<E>(s, next_, step_);
 }
 
 template<typename T>
@@ -63,7 +63,7 @@ VESSL_INLINE T envelope<T>::stage::step()
   analog_t s = dt_ / math::max<analog_t>(cast<analog_t>(duration()), dt_);
   time_ += s;
   analog_t t = math::constrain<analog_t>(time_, 0.0, 1.0);
-  params_.output.value = math::easing::interp<E, T>(begin_, params_.target.value, t);
+  params_.output.value = math::interp<E>(begin_, params_.target.value, t);
   if (time_ >= 1)
   {
     params_.active.value = false;

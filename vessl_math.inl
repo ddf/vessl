@@ -68,7 +68,8 @@ VESSL_INLINE T range(T low, T high)
 namespace easing
 {
 
-VESSL_INLINE analog_t linear::operator()(analog_t t) const
+template<typename D>
+VESSL_INLINE D linear::operator()(D t) const
 {
   return t;
 }
@@ -117,13 +118,6 @@ VESSL_INLINE analog_t quad::out_in::operator()(analog_t t) const
   return t < 0.5 ? qo(2*t) * 0.5f : 1.0f - qo(2*t) * 0.5f;
 }
 
-template<typename E, typename T>
-VESSL_INLINE T interp(T begin, T end, analog_t t)
-{
-  static E ease;
-  return (end-begin) * ease(math::constrain(t, 0.f, 1.f)) + begin;
-}
-
 template <typename T>
 VESSL_INLINE T smooth(T value, T target, analog_t degree)
 {
@@ -151,19 +145,82 @@ VESSL_INLINE digital_t smooth<digital_t>(digital_t value, digital_t target, anal
 }
 } // namespace easing
 
-template <typename T>
-VESSL_INLINE T lerp(T begin, T end, analog_t t)
+template<typename D>
+VESSL_INLINE D clamp_delta(D t)
 {
-  return easing::interp<easing::linear, T>(begin, end, t);
+  return t < 0 ? 0 : t > 1 ? 1 : t;
+}
+
+template<>
+VESSL_INLINE phase_t clamp_delta<phase_t>(phase_t t)
+{
+  return t;
+}
+
+template<>
+VESSL_INLINE q31 clamp_delta<q31>(q31 t)
+{
+  return t < q31::mid() ? q31::mid() : t > q31::max() ? q31::max() : t;
+}
+
+template<typename E, typename T, typename D>
+VESSL_INLINE T interp(T begin, T end, D t)
+{
+  static E ease;
+  t = clamp_delta(t);
+  return (end-begin) * ease(t) + begin;
+}
+
+template<typename T, typename D>
+struct lerper
+{
+  VESSL_INLINE T operator()(T begin, T end, D t)
+  {
+    return interp<easing::linear>(begin, end, t);
+  }
+};
+
+template<typename T>
+struct lerper<T,phase_t>
+{
+  VESSL_INLINE T operator()(T begin, T end, phase_t t)
+  {
+    return t == phase_zero ? begin 
+         : t == phase_360 ? end 
+         : begin < end ? begin + (end-begin)*t/phase_360
+         : begin - (begin-end)*t/phase_360; 
+  }
+};
+
+template <typename T, typename D>
+VESSL_INLINE T lerp(T begin, T end, D t)
+{
+  static lerper<T,D> func;
+  return func(begin, end, t);
 }
 
 template <typename T>
-VESSL_INLINE T lerpp(T begin, T end, phase_t t)
-{ 
-  return t == phase_zero ? begin 
-           : t == phase_360 ? end 
-           : begin < end ? begin + (end-begin)*t/phase_360
-           : begin - (begin-end)*t/phase_360; 
+VESSL_INLINE T wrap(T val, T low, T high)
+{
+  // @todo probably a way to do this without while loops.
+  T diff = high - low;
+  while (val < low) { val += diff; }
+  while (val > high) { val -= diff; }
+  return val; 
+}
+
+template<>
+VESSL_INLINE phase_t wrap01<phase_t>(phase_t val)
+{
+  return val;
+}
+      
+template<>
+VESSL_INLINE analog_t wrap01<analog_t>(analog_t v)
+{
+  analog_t i; 
+  analog_t f = mod(v, &i);
+  return f < 0 ? f + 1.0f : f;
 }
 
 } // namespace math

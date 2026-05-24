@@ -150,7 +150,7 @@ template<typename T>
 VESSL_INLINE T min(const T& a, const T& b) { return a < b ? a : b; }
 
 template<typename T>
-VESSL_INLINE T mod(T v, T* i) { return std::modf(v, i); }
+VESSL_INLINE T mod(T v, T* i) { return ::modf(v, i); }
 
 template<typename T>
 VESSL_INLINE T pow(T x, T y) { return ::pow(x, y); }
@@ -162,50 +162,32 @@ template<typename T>
 VESSL_INLINE T floor(T x) { return ::floor(x); }
 
 template<typename T, typename R = T>
-VESSL_INLINE T sin(R r) { return std::sin(r); }
+VESSL_INLINE T sin(R r) { return ::sin(r); }
 
 template<typename T, typename R = T>
-VESSL_INLINE T cos(R r) { return std::cos(r); }
+VESSL_INLINE T cos(R r) { return ::cos(r); }
 
 template<typename T>
-VESSL_INLINE T sqrt(T x) { return std::sqrt(x); }
+VESSL_INLINE T sqrt(T x) { return ::sqrt(x); }
       
 template<typename T>
 VESSL_INLINE T sqrt2() { static T v = sqrt(2); return v; }
 
 template<typename T>
-VESSL_INLINE T tan(T x) { return std::tan(x); }
+VESSL_INLINE T tan(T x) { return ::tan(x); }
     
 analog_t decibels_to_scale(analog_t db);
 
 analog_t scale_to_decibels(analog_t scale);
 
-template<typename T>
-T lerp(T begin, T end, analog_t t);
-
-// @todo figure out a better name for this
-template<typename T>
-T lerpp(T begin, T end, phase_t t);
+template<typename T, typename D>
+T lerp(T begin, T end, D t);
 
 template<typename T>
-VESSL_INLINE T wrap(T val, T low, T high)
-{
-  // @todo probably a way to do this without while loops.
-  T diff = high - low;
-  while (val < low) { val += diff; }
-  while (val > high) { val -= diff; }
-  return val;
-}
+T wrap(T val, T low, T high);
 
-// @todo use modf here
 template<typename T>
 VESSL_INLINE T wrap01(T val) { return wrap(val, T(0), T(1)); }
-
-template<>
-VESSL_INLINE phase_t wrap01<phase_t>(phase_t val) { return val; }
-      
-template<>
-VESSL_INLINE analog_t wrap01<analog_t>(analog_t v) { analog_t i; analog_t f = mod(v, &i); return f < 0 ? f + 1.0f : f; }
 
 template<typename T>
 VESSL_INLINE binary_t is_nan(T n) { return isnan(n); }
@@ -230,7 +212,8 @@ namespace easing
 {
 struct linear
 {
-  analog_t operator()(analog_t t) const;
+  template<typename D>
+  D operator()(D t) const;
 };
 
 struct smoothstep
@@ -253,10 +236,6 @@ struct out { analog_t operator()(analog_t t) const; };
 struct in_out { analog_t operator()(analog_t t) const; };
 }
 
-// easing is first parameter so T can be deduced
-template<typename E, typename T>
-T interp(T begin, T end, analog_t t);
-
 template<typename T>
 T smooth(T value, T target, analog_t degree = 0.9f);
     
@@ -274,6 +253,10 @@ struct smoother
   smoother& operator=(const T& v);
 };
 } // namespace easing
+
+// easing is first parameter so T can be deduced
+template<typename E, typename T, typename D>
+T interp(T begin, T end, D t);
 
 } // namespace math
 
@@ -475,10 +458,13 @@ struct frame : array<T>
 {
   T samples[N];
 
-  VESSL_INLINE frame();
-  VESSL_INLINE explicit frame(T m);
-  VESSL_INLINE frame(const frame& other);
-  // @todo move and assignment operators
+  frame();
+  explicit frame(T m);
+  frame(const frame& other);
+  frame(frame&&) = default;
+  frame& operator=(const frame&) = default;
+  frame& operator=(frame&&) = default;
+  ~frame() = default;
 
   // mixdown to a mono frame
   frame<T, 1> to_mono() const;

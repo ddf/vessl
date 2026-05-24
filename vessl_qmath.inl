@@ -107,7 +107,7 @@ namespace vessl
     }
   
     template<>
-    [[nodiscard]] VESSL_INLINE q31 lerpp<q31>(q31 begin, q31 end, phase_t t)
+    [[nodiscard]] VESSL_INLINE q31 lerp<q31, phase_t>(q31 begin, q31 end, phase_t t)
     {
       return t == phase_zero ? begin 
           : t == phase_360 ? end 

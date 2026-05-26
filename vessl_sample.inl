@@ -24,6 +24,18 @@ frame<T, N>::frame(const frame &other): array<T>(samples, N)
 }
 
 template <typename T, size_t N>
+frame<T, N>& frame<T, N>::operator=(const frame& rhs)
+{
+  if (this == &rhs)
+  {
+    return *this;
+  }
+  
+  rhs.copy_to(*this);
+  return *this;
+}
+
+template <typename T, size_t N>
 frame<T, 1> frame<T, N>::to_mono() const
 {
   T sum = 0;
@@ -188,7 +200,7 @@ struct frame<T, 3> : array<T>
   VESSL_INLINE frame(frame&& other) noexcept : array<T>(samples, 2) { samples[0] = std::move(other.samples[0]); samples[1] = std::move(other.samples[1]); samples[2] = std::move(other.samples[2]); }
   VESSL_INLINE ~frame() = default;
     
-  VESSL_INLINE frame& operator=(const frame& other)  // NOLINT(bugprone-unhandled-self-assignment)
+  VESSL_INLINE frame& operator=(const frame& other)
   {
     if (this == &other)
     {

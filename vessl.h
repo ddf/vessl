@@ -161,10 +161,10 @@ VESSL_INLINE T round(T x) { return ::round(x); }
 template<typename T>
 VESSL_INLINE T floor(T x) { return ::floor(x); }
 
-template<typename T, typename R = T>
+template<typename T, typename R>
 VESSL_INLINE T sin(R r) { return ::sin(r); }
 
-template<typename T, typename R = T>
+template<typename T, typename R>
 VESSL_INLINE T cos(R r) { return ::cos(r); }
 
 template<typename T>
@@ -461,8 +461,8 @@ struct frame : array<T>
   frame();
   explicit frame(T m);
   frame(const frame& other);
+  frame& operator=(const frame&);
   frame(frame&&) = default;
-  frame& operator=(const frame&) = default;
   frame& operator=(frame&&) = default;
   ~frame() = default;
 
@@ -473,23 +473,25 @@ struct frame : array<T>
   matrix<T> as_matrix() const;
 };
 
+// @todo these don't work correctly, need to figure out why.
+// might have to do with missing / incorrect move constructors.
 template<typename T, size_t N>
-VESSL_INLINE constexpr frame<T, N> operator+(frame<T,N> lhs, const frame<T,N>& rhs);
+constexpr frame<T, N> operator+(frame<T,N> lhs, const frame<T,N>& rhs);
 
 template<typename T, size_t N>
-VESSL_INLINE constexpr frame<T, N> operator-(frame<T,N> lhs, const frame<T,N>& rhs);
+constexpr frame<T, N> operator-(frame<T,N> lhs, const frame<T,N>& rhs);
 
 template<typename T, size_t N>
-VESSL_INLINE constexpr frame<T, N> operator*(frame<T, N> lhs, const frame<T,N>& rhs);
+constexpr frame<T, N> operator*(frame<T, N> lhs, const frame<T,N>& rhs);
 
 template<typename T, size_t N>
-VESSL_INLINE constexpr frame<T, N> operator*(frame<T, N> lhs, const T& rhs);
+constexpr frame<T, N> operator*(frame<T, N> lhs, const T& rhs);
 
 template<typename T, size_t N>
-VESSL_INLINE constexpr frame<T, N> operator*(T lhs, const frame<T, N>& rhs);
+constexpr frame<T, N> operator*(T lhs, const frame<T, N>& rhs);
 
 template<typename T, size_t N>
-VESSL_INLINE constexpr frame<T, N> operator^(frame<T, N> lhs, const frame<T,N>& rhs);
+constexpr frame<T, N> operator^(frame<T, N> lhs, const frame<T,N>& rhs);
     
 template<typename T>
 struct type

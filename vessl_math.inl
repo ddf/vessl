@@ -22,13 +22,13 @@ VESSL_INLINE analog_t scale_to_decibels(analog_t scale)
 template<>
 VESSL_INLINE analog_t sin<analog_t, phase_t>(phase_t z) 
 { 
-  return math::sin<analog_t>(math::two_pi<analog_t>() * cast<analog_t>(z)); 
+  return sin<analog_t>(two_pi<analog_t>() * cast<analog_t>(z)); 
 }
 
 template<>
 VESSL_INLINE analog_t cos<analog_t, phase_t>(phase_t z) 
 { 
-  return math::cos<analog_t>(math::two_pi<analog_t>() * cast<analog_t>(z)); 
+  return cos<analog_t>(two_pi<analog_t>() * cast<analog_t>(z)); 
 }
   
 template<typename T, size_t N>
@@ -205,7 +205,7 @@ VESSL_INLINE T lerp(T begin, T end, D t)
   return func(begin, end, t);
 }
 
-template <typename T>
+template<typename T>
 VESSL_INLINE T wrap(T val, T low, T high)
 {
   // @todo probably a way to do this without while loops.

@@ -60,7 +60,7 @@ template<typename T>
 VESSL_INLINE T range(T low, T high)
 {
   static constexpr analog_t scale = 1/4294967296.0;
-  analog_t r = cast<analog_t>(u32()) * scale;
+  analog_t r = static_cast<analog_t>(u32()) * scale;
   return low + r*(high-low);
 }
 } // namespace random

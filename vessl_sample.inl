@@ -6,21 +6,21 @@ namespace sample
 {
 
 template <typename T, size_t N>
-frame<T, N>::frame(): array<T>(samples, N)
+frame<T, N>::frame()
 {
-  array<T>::fill(0);
+  as_array().fill(0);
 }
 
 template <typename T, size_t N>
 frame<T, N>::frame(T m): array<T>(samples, N)
 {
-  array<T>::fill(m);
+  as_array().fill(m);
 }
 
 template <typename T, size_t N>
 frame<T, N>::frame(const frame &other): array<T>(samples, N)
 {
-  other.copy_to(*this);
+  other.as_array().copy_to(this->as_array());
 }
 
 template <typename T, size_t N>
@@ -31,7 +31,7 @@ frame<T, N>& frame<T, N>::operator=(const frame& rhs)
     return *this;
   }
   
-  rhs.copy_to(*this);
+  rhs.as_array().copy_to(this->as_array());
   return *this;
 }
 
@@ -44,6 +44,12 @@ frame<T, 1> frame<T, N>::to_mono() const
     sum += samples[c];
   }
   return frame<T, 1>(sum / N);
+}
+
+template <typename T, size_t N>
+array<T> frame<T, N>::as_array() const
+{
+  return array<T>(samples, N);
 }
 
 template <typename T, size_t N>
@@ -104,14 +110,14 @@ VESSL_INLINE constexpr frame<T, N> operator^(frame<T, N> lhs, const frame<T,N>& 
 }
 
 template<typename T>
-struct frame<T, 1> : array<T>
+struct frame<T, 1>
 {
   T samples[1];
   
-  VESSL_INLINE frame() : array<T>(samples, 1) { samples[0] = 0; }
-  VESSL_INLINE explicit frame(T m) : array<T>(samples, 1) { samples[0] = m; }
-  VESSL_INLINE frame(const frame& other) : array<T>(samples, 1) { samples[0] = other.samples[0]; }
-  VESSL_INLINE frame(frame&& other) noexcept : array<T>(samples, 1) { samples[0] = std::move(other.samples[0]); }
+  VESSL_INLINE frame() { samples[0] = 0; }
+  VESSL_INLINE explicit frame(T m) { samples[0] = m; }
+  VESSL_INLINE frame(const frame& other) { samples[0] = other.samples[0]; }
+  VESSL_INLINE frame(frame&& other) noexcept { samples[0] = std::move(other.samples[0]); }
   VESSL_INLINE ~frame() = default;
   
   VESSL_INLINE frame& operator=(const frame& other)  // NOLINT(bugprone-unhandled-self-assignment)
@@ -137,6 +143,7 @@ struct frame<T, 1> : array<T>
   }
   
   VESSL_INLINE frame to_mono() const { return frame(samples[0]); }
+  VESSL_INLINE array<T> as_array() const { return array<T>(samples, 1); }
   VESSL_INLINE matrix<T> as_matrix() const { return matrix<T>(samples, 1, 1); }
 
   VESSL_INLINE T& value() { return samples[0]; }
@@ -148,11 +155,11 @@ struct frame<T, 2> : array<T>
 {
   T samples[2];
 
-  VESSL_INLINE frame() : array<T>(samples, 2) { samples[0] =  T(0LL); samples[1] = T(0LL); }
-  VESSL_INLINE explicit frame(T m) : array<T>(samples, 2) { samples[0] = m; samples[1] = m; }
-  VESSL_INLINE frame(T left, T right) : array<T>(samples, 2) { samples[0] = left, samples[1] = right; }
-  VESSL_INLINE frame(const frame& other) : array<T>(samples, 2) { samples[0] = other.samples[0]; samples[1] = other.samples[1]; }
-  VESSL_INLINE frame(frame&& other) noexcept : array<T>(samples, 2) { samples[0] = std::move(other.samples[0]); samples[1] = std::move(other.samples[1]); }
+  VESSL_INLINE frame() { samples[0] =  T(0LL); samples[1] = T(0LL); }
+  VESSL_INLINE explicit frame(T m) { samples[0] = m; samples[1] = m; }
+  VESSL_INLINE frame(T left, T right) { samples[0] = left, samples[1] = right; }
+  VESSL_INLINE frame(const frame& other) { samples[0] = other.samples[0]; samples[1] = other.samples[1]; }
+  VESSL_INLINE frame(frame&& other) noexcept { samples[0] = std::move(other.samples[0]); samples[1] = std::move(other.samples[1]); }
   VESSL_INLINE ~frame() = default;
   
   VESSL_INLINE frame& operator=(const frame& other)  // NOLINT(bugprone-unhandled-self-assignment)
@@ -180,6 +187,7 @@ struct frame<T, 2> : array<T>
   }
   
   VESSL_INLINE frame<T, 1> to_mono() const { return frame<T, 1>((samples[0] + samples[1]) * 0.5f); }
+  VESSL_INLINE array<T> as_array() const { return array<T>(samples, 2); }
   VESSL_INLINE matrix<T> as_matrix() const { return matrix<T>(samples, 2, 1); }
 
   VESSL_INLINE T& left() { return samples[0]; }
@@ -189,15 +197,15 @@ struct frame<T, 2> : array<T>
 };
   
 template<typename T>
-struct frame<T, 3> : array<T>
+struct frame<T, 3>
 {
   T samples[3];
 
-  VESSL_INLINE frame() : array<T>(samples, 3) { samples[0] =  T(0LL); samples[1] = T(0LL); samples[2] = T(0LL); }
-  VESSL_INLINE explicit frame(T m) : array<T>(samples, 3) { samples[0] = m; samples[1] = m; samples[2] = m; }
-  VESSL_INLINE frame(T left, T center, T right) : array<T>(samples, 2) { samples[0] = left, samples[1] = center; samples[2] = right; }
-  VESSL_INLINE frame(const frame& other) : array<T>(samples, 2) { samples[0] = other.samples[0]; samples[1] = other.samples[1]; samples[2] = other.samples[2]; }
-  VESSL_INLINE frame(frame&& other) noexcept : array<T>(samples, 2) { samples[0] = std::move(other.samples[0]); samples[1] = std::move(other.samples[1]); samples[2] = std::move(other.samples[2]); }
+  VESSL_INLINE frame() { samples[0] =  T(0LL); samples[1] = T(0LL); samples[2] = T(0LL); }
+  VESSL_INLINE explicit frame(T m) { samples[0] = m; samples[1] = m; samples[2] = m; }
+  VESSL_INLINE frame(T left, T center, T right) { samples[0] = left, samples[1] = center; samples[2] = right; }
+  VESSL_INLINE frame(const frame& other) { samples[0] = other.samples[0]; samples[1] = other.samples[1]; samples[2] = other.samples[2]; }
+  VESSL_INLINE frame(frame&& other) noexcept { samples[0] = std::move(other.samples[0]); samples[1] = std::move(other.samples[1]); samples[2] = std::move(other.samples[2]); }
   VESSL_INLINE ~frame() = default;
     
   VESSL_INLINE frame& operator=(const frame& other)
@@ -227,6 +235,7 @@ struct frame<T, 3> : array<T>
   }
     
   VESSL_INLINE frame<T, 1> to_mono() const { return frame<T, 1>((samples[0] + samples[1] + samples[2]) / T(3)); }
+  VESSL_INLINE array<T> as_array() const { return array<T>(samples, 3); }
   VESSL_INLINE matrix<T> as_matrix() const { return matrix<T>(samples, 3, 1); }
   
   VESSL_INLINE T& left() { return samples[0]; }
@@ -413,7 +422,7 @@ VESSL_INLINE ring_buffer<T> ring_buffer<T>::operator<<(typename array<T>::reader
 }
 
 template<typename T>
-T delay_line<T>::read(size_t sample_delay) const
+VESSL_INLINE T delay_line<T>::read(size_t sample_delay) const
 {
   assert(sample_delay < size());
   sample_delay = size() - 1 - sample_delay;
@@ -423,7 +432,7 @@ T delay_line<T>::read(size_t sample_delay) const
 
 template<typename T>
 template<typename I>
-T delay_line<T>::read(analog_t sample_delay) const
+VESSL_INLINE T delay_line<T>::read(analog_t sample_delay) const
 {
   assert(sample_delay >= 0 && sample_delay < size());
   analog_t size_f = cast<analog_t>(size());
@@ -440,7 +449,7 @@ T delay_line<T>::read(analog_t sample_delay) const
 }
 
 template<typename T>
-T delay_line<T>::evaluate(phase_t phase) const
+VESSL_INLINE T delay_line<T>::evaluate(phase_t phase) const
 {
   analog_t size_f = cast<analog_t>(size());
   analog_t sample_delay = cast<analog_t>(phase_360 - phase) * size_f;

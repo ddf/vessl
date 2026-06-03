@@ -355,6 +355,35 @@ private:
   phase_t  dt_;
 };
 
+template<typename T>
+class clock final : public unit_generator<T>
+  , protected plist<0>
+  , time::clockable
+{
+public:
+  clock(analog_t sample_rate, period_t sample_period_min, period_t sample_period_max, analog_t bpm = 60);
+
+  [[nodiscard]] const parameter_list & parameters() const override { return *this; }
+  
+  VESSL_INLINE void tap() { clockable::clock(); }
+  VESSL_INLINE void tap(period_t sample_delay) { clockable::clock(sample_delay); }
+  
+  // @todo hide these with parameters so we can set the speed of the clock directly.
+  using clockable::bpm;
+  using clockable::period;
+  using clockable::frequency;
+  
+  T generate() override;
+
+protected:
+  [[nodiscard]] parameter element_at(size_t index) const override;
+
+private:
+  phase_t dt_;
+  phase_t phase_;
+  sample::waves::clock<T> pulse_;
+};
+
 } // namespace generators
   
 namespace processors

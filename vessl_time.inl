@@ -4,18 +4,41 @@ namespace vessl
 {
 namespace time
 {
+VESSL_INLINE clockable::clockable(analog_t sample_rate, period_t sample_period_min, period_t sample_period_max, analog_t bpm)
+  : tempo_(duration::from_bpm(bpm, sample_rate))
+  , period_min_(sample_period_min)
+  , period_max_(sample_period_max)
+  , ticks_(0)
+  , sample_rate_(sample_rate)
+{}
+
 VESSL_INLINE void clockable::clock()
 {
-  tempo_.samples = cast<analog_t>(math::constrain(ticks_, period_min_, period_max_));
+  tempo_.samples = static_cast<analog_t>(math::constrain(ticks_, period_min_, period_max_));
   ticks_ = 0;
   tock(0);
 }
 
 VESSL_INLINE void clockable::clock(period_t sample_delay)
 {
-  tempo_.samples = cast<analog_t>(math::constrain(ticks_ + sample_delay, period_min_, period_max_));
+  tempo_.samples = static_cast<analog_t>(math::constrain(ticks_ + sample_delay, period_min_, period_max_));
   ticks_ = 0;
   tock(sample_delay);
+}
+
+VESSL_INLINE void clockable::tick()
+{
+  ++ticks_;
+}
+
+VESSL_INLINE void clockable::tick(size_t t)
+{
+  ticks_ += t;
+}
+
+VESSL_INLINE void clockable::tock(size_t sample_delay)
+{
+  (void)sample_delay;
 }
 }
 }

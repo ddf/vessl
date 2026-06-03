@@ -452,9 +452,10 @@ class matrix;
 
 namespace sample
 {
-// a struct to hold one sample frame
+// a struct to hold one sample frame.
+// doesn't subclass array so that we don't incur the extra memory.
 template<typename T, size_t N>
-struct frame : array<T>
+struct frame
 {
   T samples[N];
 
@@ -469,6 +470,8 @@ struct frame : array<T>
   // mixdown to a mono frame
   frame<T, 1> to_mono() const;
           
+  // array view of this frame
+  array<T> as_array() const;
   // matrix view of this frame
   matrix<T> as_matrix() const;
 };
@@ -570,7 +573,7 @@ struct clock final : waveform<T>
   phase_t pulse_width;
   clock() : pulse_width(phase_180) {}
   explicit clock(phase_t pw) : pulse_width(pw) {}
-  VESSL_INLINE T evaluate(phase_t phase) const override { return phase < pulse_width ? 1 : 0; }
+  VESSL_INLINE T evaluate(phase_t phase) const override { return phase < pulse_width ? T(1) : T(0); }
 };
 }
   
@@ -1000,6 +1003,7 @@ struct duration
   static duration from_seconds(analog_t seconds, analog_t sample_rate) { return duration(sample_rate*seconds); }
   [[nodiscard]] analog_t to_bpm(analog_t sample_rate) const { return f_to_b*(sample_rate/samples); }
   [[nodiscard]] analog_t to_seconds(analog_t sample_rate) const { return samples/sample_rate; }
+  [[nodiscard]] analog_t to_frequency(analog_t sample_rate) const { return sample_rate/samples; }
 };
   
   
@@ -1009,31 +1013,31 @@ class clockable
 public:
   using period_t = uint32_t;
 
-  clockable(analog_t sample_rate, period_t sample_period_min, period_t sample_period_max, analog_t bpm = 60)
-  : tempo_(duration::from_bpm(bpm, sample_rate)), period_min_(sample_period_min), period_max_(sample_period_max)
-  , ticks_(0), sample_rate_(sample_rate) {}
+  clockable(analog_t sample_rate, period_t sample_period_min, period_t sample_period_max, analog_t bpm = 60);
   virtual ~clockable() = default;
   clockable(const clockable&) = default;
   clockable(clockable&&) = default;
   clockable& operator=(const clockable&) = default;
   clockable& operator=(clockable&&) = default;
       
-  // users should call clock at the beginning of every clock pulse
+  // users should call tap at the beginning of every clock pulse
   void clock();
   void clock(period_t sample_delay);
 
-  analog_t bpm() const { return tempo_.to_bpm(sample_rate_); }
+  [[nodiscard]] analog_t bpm() const { return tempo_.to_bpm(sample_rate_); }
   // length of one clock pulse in samples
-  analog_t period() const { return tempo_.samples;}
+  [[nodiscard]] analog_t period() const { return tempo_.samples;}
+  // frequency of clock pulse in hz
+  [[nodiscard]] analog_t frequency() const { return tempo_.to_frequency(sample_rate_); }
       
 protected:
   // subclasses should call tick for every sample generated/processed
-  void tick() { ++ticks_; }
-  void tick(size_t t) { ticks_ += t; }
+  void tick();
+  void tick(size_t t);
 
   // subclasses can override this to be notified every time they receive a clock pulse
-  virtual void tock(size_t sample_delay) { (void)sample_delay; }
-      
+  virtual void tock(size_t sample_delay);
+
   duration tempo_;
   period_t period_min_;
   period_t period_max_;

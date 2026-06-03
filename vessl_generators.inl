@@ -155,5 +155,30 @@ VESSL_INLINE void oscil<W>::generate(sink<typename W::sample_t>& dest)
     phase_ += step;
   }
 }
+
+template <typename T>
+clock<T>::clock(analog_t sample_rate, period_t sample_period_min, period_t sample_period_max, analog_t bpm)
+  : clockable(sample_rate, sample_period_min, sample_period_max, bpm)
+  , dt_(cast<phase_t>(1.0f/sample_rate)), phase_(phase_zero)
+  , pulse_(phase_90)
+{
+    
+}
+
+template <typename T>
+VESSL_INLINE T clock<T>::generate()
+{
+  tick();
+  T val = pulse_.evaluate(phase_);
+  analog_t freq = tempo_.to_frequency(sample_rate_);
+  phase_ += static_cast<phase_t>(dt_ * freq);
+  return val;
+}
+
+template <typename T>
+VESSL_INLINE parameter clock<T>::element_at(size_t index) const
+{
+  return parameter::none();
+}
 } // namespace generators
 } // namespace vessl

@@ -311,6 +311,14 @@ T vessl::sample::waves::cosine<T>::evaluate(phase_t phase) const
   return math::cos<T>(phase);
 }
 
+template <typename T>
+T vessl::sample::waves::triangle<T>::evaluate(phase_t phase) const
+{
+  size_t wph = static_cast<size_t>(phase) << 1;
+  return wph < phase_360 ? math::lerp(T(-1), T(1), static_cast<phase_t>(wph)) 
+    : math::lerp(T(1), T(-1), static_cast<phase_t>(wph - phase_360));
+}
+
 template <typename T, typename I>
 VESSL_INLINE T vessl::sample::read_interpolated(const T *buffer, analog_t frac_idx)
 {

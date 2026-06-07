@@ -558,6 +558,12 @@ struct cosine final : waveform<T>
 };
 
 template<typename T>
+struct triangle final : waveform<T>
+{
+  VESSL_INLINE T evaluate(phase_t phase) const override;
+};
+
+template<typename T>
 struct square final : waveform<T>
 {
   phase_t pulse_width;

@@ -166,6 +166,12 @@ clock<T>::clock(analog_t sample_rate, period_t sample_period_min, period_t sampl
 }
 
 template <typename T>
+parameter clock<T>::tempo() const
+{
+  return parameter("tempo",'t', &tempo_);
+}
+
+template <typename T>
 VESSL_INLINE T clock<T>::generate()
 {
   tick();
@@ -178,7 +184,7 @@ VESSL_INLINE T clock<T>::generate()
 template <typename T>
 VESSL_INLINE parameter clock<T>::element_at(size_t index) const
 {
-  return parameter::none();
+  return tempo();
 }
 } // namespace generators
 } // namespace vessl

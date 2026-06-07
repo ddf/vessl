@@ -16,6 +16,21 @@ VESSL_INLINE constexpr parameter::desc parameter::desc_list<N>::operator[](id_t 
 }
 
 template <typename T>
+VESSL_INLINE constexpr parameter::parameter(const desc &param_desc, const data<T> &param_data)
+  : desc_(param_desc)
+  , data_(&const_cast<data<T>&>(param_data).value)
+{
+  
+}
+
+template <typename T>
+constexpr parameter::parameter(const char *name, id_t id, const T* param_data)
+  : desc_(name, id, type_of<T>())
+  , data_(const_cast<T*>(param_data))
+{
+}
+
+template <typename T>
 VESSL_INLINE T parameter::read() const
 {
   switch (desc_.type)
@@ -125,7 +140,7 @@ struct parameter::data<gain_t>
 template<>
 struct parameter::data<duration_t>
 {
-  duration_t value = duration_t();
+  duration_t value = duration_t::from_seconds(0,0);
 };
 
 template <typename T>

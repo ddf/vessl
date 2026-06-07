@@ -8,7 +8,7 @@ VESSL_INLINE clockable::clockable(analog_t sample_rate, period_t sample_period_m
   : tempo_(duration::from_bpm(bpm, sample_rate))
   , period_min_(sample_period_min)
   , period_max_(sample_period_max)
-  , ticks_(0)
+  , ticks_(sample_period_max) // start unclocked
   , sample_rate_(sample_rate)
 {}
 
@@ -26,17 +26,22 @@ VESSL_INLINE void clockable::clock(period_t sample_delay)
   tock(sample_delay);
 }
 
+VESSL_INLINE bool clockable::is_clocked() const
+{
+  return ticks_ < period_max_;
+}
+
 VESSL_INLINE void clockable::tick()
 {
-  ++ticks_;
+  ticks_ = math::min(ticks_ + 1,  period_max);
 }
 
-VESSL_INLINE void clockable::tick(size_t t)
+VESSL_INLINE void clockable::tick(period_t t)
 {
-  ticks_ += t;
+  ticks_ = ticks_ < period_max - t ? ticks_ + t : period_max;
 }
 
-VESSL_INLINE void clockable::tock(size_t sample_delay)
+VESSL_INLINE void clockable::tock(period_t sample_delay)
 {
   (void)sample_delay;
 }

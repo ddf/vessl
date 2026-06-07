@@ -980,30 +980,27 @@ enum class mode : uint8_t
   slew, // smooth duration when it changes
   fade, // crossfade to new duration across a block of samples
 };
-  
+
 struct duration
 {
+  analog_t samples; // analog so we can express subsample periods.
+  
+  static VESSL_INLINE duration from_bpm(analog_t bpm, analog_t sample_rate) { return duration(sample_rate/(bpm*b_to_f)); }
+  static VESSL_INLINE duration from_seconds(analog_t seconds, analog_t sample_rate) { return duration(sample_rate*seconds); }
+  [[nodiscard]] VESSL_INLINE analog_t to_bpm(analog_t sample_rate) const { return f_to_b*(sample_rate/samples); }
+  [[nodiscard]] VESSL_INLINE analog_t to_seconds(analog_t sample_rate) const { return samples/sample_rate; }
+  [[nodiscard]] VESSL_INLINE analog_t to_frequency(analog_t sample_rate) const { return sample_rate/samples; }
+
   // convert bpm to frequency in Hz
   static constexpr analog_t b_to_f = 1.0 / 60.0;  // NOLINT(clang-diagnostic-implicit-float-conversion)
   static constexpr analog_t f_to_b = 60;
-
-  analog_t samples; // analog so we can express subsample periods.
-
+  
   duration() : samples(0) {}
-  // conversions for parameter
-  explicit duration(binary_t b) : samples(b) {}
-  explicit duration(size_t s): samples(cast<analog_t>(s)) {}
-  explicit duration(digital_t i) : samples(cast<analog_t>(i)) {}
   explicit duration(analog_t a) : samples(a) {}
   explicit operator binary_t() const { return math::abs(samples) >= math::epsilon<analog_t>(); }
-  explicit operator digital_t() const { return cast<digital_t>(samples); }
+  explicit operator digital_t() const { return static_cast<digital_t>(samples); }
   explicit operator analog_t() const { return samples;}
-
-  static duration from_bpm(analog_t bpm, analog_t sample_rate) { return duration(sample_rate/(bpm*b_to_f)); }
-  static duration from_seconds(analog_t seconds, analog_t sample_rate) { return duration(sample_rate*seconds); }
-  [[nodiscard]] analog_t to_bpm(analog_t sample_rate) const { return f_to_b*(sample_rate/samples); }
-  [[nodiscard]] analog_t to_seconds(analog_t sample_rate) const { return samples/sample_rate; }
-  [[nodiscard]] analog_t to_frequency(analog_t sample_rate) const { return sample_rate/samples; }
+  explicit operator phase_t() const { return static_cast<phase_t>(samples); }
 };
   
   
@@ -1012,6 +1009,7 @@ class clockable
 {
 public:
   using period_t = uint32_t;
+  static constexpr  period_t period_max = UINT32_MAX - 1;
 
   clockable(analog_t sample_rate, period_t sample_period_min, period_t sample_period_max, analog_t bpm = 60);
   virtual ~clockable() = default;
@@ -1023,6 +1021,9 @@ public:
   // users should call tap at the beginning of every clock pulse
   void clock();
   void clock(period_t sample_delay);
+  
+  // true if this clockable is still receiving clock calls
+  [[nodiscard]] bool is_clocked() const;
 
   [[nodiscard]] analog_t bpm() const { return tempo_.to_bpm(sample_rate_); }
   // length of one clock pulse in samples
@@ -1033,10 +1034,10 @@ public:
 protected:
   // subclasses should call tick for every sample generated/processed
   void tick();
-  void tick(size_t t);
+  void tick(period_t t);
 
   // subclasses can override this to be notified every time they receive a clock pulse
-  virtual void tock(size_t sample_delay);
+  virtual void tock(period_t sample_delay);
 
   duration tempo_;
   period_t period_min_;
@@ -1098,8 +1099,11 @@ public:
   };
     
   template<typename T>
-  constexpr parameter(const desc& param_desc, const data<T>& param_data) : desc_(param_desc), data_(&const_cast<data<T>&>(param_data).value) {}
-      
+  constexpr parameter(const desc& param_desc, const data<T>& param_data);
+  
+  template<typename T>
+  constexpr parameter(const char* name, id_t id, const T* param_data);
+  
   // explicitly declared copy-constructors so that they will be used instead of the copy-assignment override
   // when returning parameter objects by value (as in plist::element_at implementations)
   constexpr parameter(parameter& param) : desc_(param.desc_), data_(param.data_) {};

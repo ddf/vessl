@@ -474,27 +474,26 @@ struct frame
   array<T> as_array() const;
   // matrix view of this frame
   matrix<T> as_matrix() const;
+  
+  template<typename Ft, size_t Fn>
+  friend constexpr frame operator+(frame lhs, const frame& rhs);
+  
+  template<typename Ft, size_t Fn>
+  friend constexpr frame operator-(frame lhs, const frame& rhs);
+  
+  template<typename Ft, size_t Fn>
+  friend constexpr frame operator*(frame lhs, const frame& rhs);
+  
+  template<typename Ft, size_t Fn>
+  friend constexpr frame operator*(frame lhs, const T& rhs);
+  
+  template<typename Ft, size_t Fn>
+  friend constexpr frame operator*(T lhs, const frame& rhs);
+  
+  template<typename Ft, size_t Fn>
+  friend constexpr frame operator^(frame lhs, const frame& rhs);
 };
 
-// @todo these don't work correctly, need to figure out why.
-// might have to do with missing / incorrect move constructors.
-template<typename T, size_t N>
-constexpr frame<T, N> operator+(frame<T,N> lhs, const frame<T,N>& rhs);
-
-template<typename T, size_t N>
-constexpr frame<T, N> operator-(frame<T,N> lhs, const frame<T,N>& rhs);
-
-template<typename T, size_t N>
-constexpr frame<T, N> operator*(frame<T, N> lhs, const frame<T,N>& rhs);
-
-template<typename T, size_t N>
-constexpr frame<T, N> operator*(frame<T, N> lhs, const T& rhs);
-
-template<typename T, size_t N>
-constexpr frame<T, N> operator*(T lhs, const frame<T, N>& rhs);
-
-template<typename T, size_t N>
-constexpr frame<T, N> operator^(frame<T, N> lhs, const frame<T,N>& rhs);
     
 template<typename T>
 struct type

@@ -148,10 +148,40 @@ struct frame<T, 1>
 
   VESSL_INLINE T& value() { return samples[0]; }
   VESSL_INLINE const T& value() const { return samples[0]; }
+  
+  friend constexpr frame operator+(frame lhs, const frame& rhs)
+  {
+    return frame(lhs.value() + rhs.value());
+  }
+  
+  friend constexpr frame operator-(frame lhs, const frame& rhs)
+  {
+    return frame(lhs.value() - rhs.value());
+  }
+  
+  friend constexpr frame operator*(frame lhs, const frame& rhs)
+  {
+    return frame(lhs.value() * rhs.value());
+  }
+  
+  friend constexpr frame operator*(frame lhs, const T& rhs)
+  {
+    return frame(lhs.value() * rhs);
+  }
+  
+  friend constexpr frame operator*(T lhs, const frame& rhs)
+  {
+    return frame(lhs * rhs.value());
+  }
+  
+  friend constexpr frame operator^(frame lhs, const frame& rhs)
+  {
+    return frame(lhs.value() ^ rhs.value());
+  }
 };
 
 template<typename T>
-struct frame<T, 2> : array<T>
+struct frame<T, 2>
 {
   T samples[2];
 
@@ -194,6 +224,36 @@ struct frame<T, 2> : array<T>
   VESSL_INLINE const T& left() const { return samples[0]; }
   VESSL_INLINE T& right() { return samples[1]; }
   VESSL_INLINE const T& right() const { return samples[1]; }
+  
+  friend constexpr frame operator+(frame lhs, const frame& rhs)
+  {
+    return {lhs.left() + rhs.left(), lhs.right() + rhs.right()};
+  }
+  
+  friend constexpr frame operator-(frame lhs, const frame& rhs)
+  {
+    return {lhs.left() - rhs.left(), lhs.right() - rhs.right()};
+  }
+  
+  friend constexpr frame operator*(frame lhs, const frame& rhs)
+  {
+    return {lhs.left() * rhs.left(), lhs.right() * rhs.right()};
+  }
+  
+  friend constexpr frame operator*(frame lhs, const T& rhs)
+  {
+    return {lhs.left() * rhs, lhs.right() * rhs};
+  }
+  
+  friend constexpr frame operator*(T lhs, const frame& rhs)
+  {
+    return {lhs * rhs.left(), lhs * rhs.right()};
+  }
+  
+  friend constexpr frame operator^(frame lhs, const frame& rhs)
+  {
+    return {lhs.left() ^ rhs.left(), lhs.right() ^ rhs.right()};
+  }
 };
   
 template<typename T>
@@ -251,6 +311,36 @@ struct frame<T, 3>
   VESSL_INLINE const T& y() const { return samples[1]; }
   VESSL_INLINE T& z() { return samples[2]; }
   VESSL_INLINE const T& z() const { return samples[2]; }
+  
+  friend constexpr frame operator+(frame lhs, const frame& rhs)
+  {
+    return {lhs.left() + rhs.left(), lhs.center() + rhs.center(), lhs.right() + rhs.right()};
+  }
+  
+  friend constexpr frame operator-(frame lhs, const frame& rhs)
+  {
+    return {lhs.left() - rhs.left(), lhs.center() - rhs.center(), lhs.right() - rhs.right()};
+  }
+  
+  friend constexpr frame operator*(frame lhs, const frame& rhs)
+  {
+    return {lhs.left() * rhs.left(), lhs.center() * rhs.center(), lhs.right() * rhs.right()};
+  }
+  
+  friend constexpr frame operator*(frame lhs, const T& rhs)
+  {
+    return {lhs.left() * rhs, lhs.center()*rhs, lhs.right() * rhs};
+  }
+  
+  friend constexpr frame operator*(T lhs, const frame& rhs)
+  {
+    return {lhs * rhs.left(), lhs * rhs.center(), lhs * rhs.right()};
+  }
+  
+  friend constexpr frame operator^(frame lhs, const frame& rhs)
+  {
+    return {lhs.left() ^ rhs.left(), lhs.center() ^ rhs.center(), lhs.right() ^ rhs.right()};
+  }
 };
 } // namespace frame
 

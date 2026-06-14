@@ -225,32 +225,38 @@ struct frame<T, 2>
   VESSL_INLINE T& right() { return samples[1]; }
   VESSL_INLINE const T& right() const { return samples[1]; }
   
-  friend constexpr frame operator+(frame lhs, const frame& rhs)
+  VESSL_INLINE friend constexpr frame operator+(frame lhs, const frame& rhs)
   {
     return {lhs.left() + rhs.left(), lhs.right() + rhs.right()};
   }
   
-  friend constexpr frame operator-(frame lhs, const frame& rhs)
+  VESSL_INLINE constexpr frame& operator+=(const frame& rhs)
+  {
+    *this = *this + rhs;
+    return *this;
+  }
+  
+  VESSL_INLINE friend constexpr frame operator-(frame lhs, const frame& rhs)
   {
     return {lhs.left() - rhs.left(), lhs.right() - rhs.right()};
   }
   
-  friend constexpr frame operator*(frame lhs, const frame& rhs)
+  VESSL_INLINE friend constexpr frame operator*(frame lhs, const frame& rhs)
   {
     return {lhs.left() * rhs.left(), lhs.right() * rhs.right()};
   }
   
-  friend constexpr frame operator*(frame lhs, const T& rhs)
+  VESSL_INLINE friend constexpr frame operator*(frame lhs, const T& rhs)
   {
     return {lhs.left() * rhs, lhs.right() * rhs};
   }
   
-  friend constexpr frame operator*(T lhs, const frame& rhs)
+  VESSL_INLINE friend constexpr frame operator*(T lhs, const frame& rhs)
   {
     return {lhs * rhs.left(), lhs * rhs.right()};
   }
   
-  friend constexpr frame operator^(frame lhs, const frame& rhs)
+  VESSL_INLINE friend constexpr frame operator^(frame lhs, const frame& rhs)
   {
     return {lhs.left() ^ rhs.left(), lhs.right() ^ rhs.right()};
   }

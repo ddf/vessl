@@ -75,14 +75,10 @@ namespace vessl
     }
     VESSL_INLINE friend q31 operator*(q31 lhs, const q31& rhs) { lhs *= rhs; return lhs; }
 
-    [[nodiscard]] VESSL_INLINE q31 scaled(int32_t factor) const
+    template<typename T>
+    [[nodiscard]] VESSL_INLINE q31 scaled(T factor) const
     {
       return sat(static_cast<int64_t>(v_) * factor);
-    }
-
-    [[nodiscard]] VESSL_INLINE q31 scaled(analog_t factor) const
-    {
-      return sat(static_cast<int64_t>(static_cast<analog_t>(v_) * factor));
     }
 
     VESSL_INLINE q31& operator/=(const q31& rhs) 

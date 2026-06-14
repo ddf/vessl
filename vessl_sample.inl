@@ -430,6 +430,22 @@ VESSL_INLINE T vessl::sample::crossfade(T a, T b, analog_t f)
   return a*ease(1.0 - f) + b*ease(f);
 }
 
+template <typename T, vessl::size_t N, typename E>
+VESSL_INLINE void vessl::sample::spatialize(const T& sample, analog_t pan, frame<T,N>* out_frame)
+{
+  static E ease;
+  
+  // see: https://www.desmos.com/calculator/atnomqw9an
+  // @todo should probably just look-up standard panning/spatialization formulas.
+  for (size_t i = 0; i < N; ++i)
+  {
+    const analog_t p = -1 + 2*static_cast<float>(i) / (N-1);
+    const analog_t d = math::abs(pan - p)*0.5f;
+    const analog_t a = 1.0f - d;
+    out_frame->samples[i] = sample * ease(a);
+  }
+}
+
 template <typename T>
 VESSL_INLINE T vessl::sample::softlimit(T x)
 {

@@ -608,6 +608,9 @@ T read_interpolated(const T* buffer, analog_t frac_idx);
   
 template<typename T, typename E = math::easing::linear>
 T crossfade(T a, T b, analog_t f);
+
+template<typename T, size_t N, typename E = math::easing::linear>
+void spatialize(const T& sample, analog_t pan, frame<T,N>* out_frame);
   
 // lovingly borrowed from pichenettes/stmlib
 template<typename T>

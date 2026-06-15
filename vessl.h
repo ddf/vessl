@@ -571,6 +571,21 @@ struct square final : waveform<T>
   VESSL_INLINE T evaluate(phase_t phase) const override { return phase < pulse_width ? 1 : -1; }
 };
 
+// same as triangle, but unipolar
+template<typename T>
+class picket final : public waveform<T>
+{
+public:
+  picket();
+  T evaluate(phase_t phase) const override;
+  void set_pulse_width(phase_t pw);
+  
+private:
+  phase_t attack_len;
+  analog_t attack_mult;
+  analog_t decay_mult;
+};
+
 // same as square, but unipolar
 template<typename T>
 struct clock final : waveform<T>

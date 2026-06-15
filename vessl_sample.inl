@@ -396,23 +396,48 @@ VESSL_INLINE T vessl::sample::interpolation::cubic<T>::operator()(const T* buffe
 }
 
 template <typename T>
-T vessl::sample::waves::sine<T>::evaluate(phase_t phase) const
+VESSL_INLINE T vessl::sample::waves::sine<T>::evaluate(phase_t phase) const
 {
   return math::sin<T>(phase);
 }
 
 template <typename T>
-T vessl::sample::waves::cosine<T>::evaluate(phase_t phase) const
+VESSL_INLINE T vessl::sample::waves::cosine<T>::evaluate(phase_t phase) const
 {
   return math::cos<T>(phase);
 }
 
 template <typename T>
-T vessl::sample::waves::triangle<T>::evaluate(phase_t phase) const
+VESSL_INLINE T vessl::sample::waves::triangle<T>::evaluate(phase_t phase) const
 {
   size_t wph = static_cast<size_t>(phase) << 1;
   return wph < phase_360 ? math::lerp(T(-1), T(1), static_cast<phase_t>(wph)) 
     : math::lerp(T(1), T(-1), static_cast<phase_t>(wph - phase_360));
+}
+
+template <typename T>
+vessl::sample::waves::picket<T>::picket()
+  : attack_len(phase_180)
+  , attack_mult(1.0f / cast<analog_t>(attack_len))
+  , decay_mult(attack_mult)
+{
+}
+
+template <typename T>
+VESSL_INLINE T vessl::sample::waves::picket<T>::evaluate(phase_t phase) const
+{
+  analog_t p = cast<analog_t>(phase);
+  return phase < attack_len ? T(p*attack_mult) : T((1.f - p)*decay_mult);
+}
+
+template <typename T>
+void vessl::sample::waves::picket<T>::set_pulse_width(phase_t pw)
+{
+  static constexpr phase_t pwlo = cast<phase_t>(0.01f);
+  static constexpr phase_t pwhi = cast<phase_t>(0.99f);
+  attack_len = math::constrain(pw, pwlo, pwhi);
+  attack_mult = 1.f / cast<analog_t>(attack_len);
+  decay_mult = 1.f /  cast<analog_t>(phase_360 - attack_len);
 }
 
 template <typename T, typename I>

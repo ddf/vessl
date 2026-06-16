@@ -382,7 +382,7 @@ protected:
 private:
   phase_t dt_;
   phase_t phase_;
-  sample::waves::clock<T> pulse_;
+  sample::waves::unipolar::square<T> pulse_;
 };
 
 } // namespace generators

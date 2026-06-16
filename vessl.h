@@ -543,23 +543,25 @@ struct waveform
   
 namespace waves
 {
+namespace bipolar
+{
 template<typename T>
 struct sine final : waveform<T>
 {
   // default implementation assumes default parameter type (floating point)
-  VESSL_INLINE T evaluate(phase_t phase) const override;
+  T evaluate(phase_t phase) const override;
 };
 
 template<typename T>
 struct cosine final : waveform<T>
 {
-  VESSL_INLINE T evaluate(phase_t phase) const override;
+  T evaluate(phase_t phase) const override;
 };
 
 template<typename T>
 struct triangle final : waveform<T>
 {
-  VESSL_INLINE T evaluate(phase_t phase) const override;
+  T evaluate(phase_t phase) const override;
 };
 
 template<typename T>
@@ -570,32 +572,34 @@ struct square final : waveform<T>
   explicit square(phase_t pw) : pulse_width(pw) {}
   VESSL_INLINE T evaluate(phase_t phase) const override { return phase < pulse_width ? 1 : -1; }
 };
+} // namespace bipolar
 
-// same as triangle, but unipolar
+namespace unipolar
+{
 template<typename T>
-class picket final : public waveform<T>
+class triangle final : public waveform<T>
 {
 public:
-  picket();
+  triangle();
   T evaluate(phase_t phase) const override;
   void set_pulse_width(phase_t pw);
   
 private:
-  phase_t attack_len;
-  analog_t attack_mult;
-  analog_t decay_mult;
+  phase_t attack_len_;
+  analog_t attack_mult_;
+  analog_t decay_mult_;
 };
 
-// same as square, but unipolar
 template<typename T>
-struct clock final : waveform<T>
+struct square final : waveform<T>
 {
   phase_t pulse_width;
-  clock() : pulse_width(phase_180) {}
-  explicit clock(phase_t pw) : pulse_width(pw) {}
+  square() : pulse_width(phase_180) {}
+  explicit square(phase_t pw) : pulse_width(pw) {}
   VESSL_INLINE T evaluate(phase_t phase) const override { return phase < pulse_width ? T(1) : T(0); }
 };
-}
+} // namespace unipolar
+} // namespace waves
   
 namespace interpolation
 {
@@ -934,10 +938,12 @@ public:
   {
     using m = matrix<T>;
     sample::frame<T,3> output;
+    T* out = output.samples;
+    const T* in = input.samples;
 
-    output[0] = m::get(0,0) * input[0] + m::get(0,1) * input[1] + m::get(0,2) * input[2];
-    output[1] = m::get(1,0) * input[0] + m::get(1,1) * input[1] + m::get(1,2) * input[2];
-    output[2] = m::get(2,0) * input[0] + m::get(2,1) * input[1] + m::get(2,2) * input[2];
+    out[0] = m::get(0,0) * in[0] + m::get(0,1) * in[1] + m::get(0,2) * in[2];
+    out[1] = m::get(1,0) * in[0] + m::get(1,1) * in[1] + m::get(1,2) * in[2];
+    out[2] = m::get(2,0) * in[0] + m::get(2,1) * in[1] + m::get(2,2) * in[2];
 
     // this might be faster?
     //mtrx.multiply(input.toMatrix(), output.toMatrix());

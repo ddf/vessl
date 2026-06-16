@@ -230,12 +230,6 @@ struct frame<T, 2>
     return {lhs.left() + rhs.left(), lhs.right() + rhs.right()};
   }
   
-  VESSL_INLINE constexpr frame& operator+=(const frame& rhs)
-  {
-    *this = *this + rhs;
-    return *this;
-  }
-  
   VESSL_INLINE friend constexpr frame operator-(frame lhs, const frame& rhs)
   {
     return {lhs.left() - rhs.left(), lhs.right() - rhs.right()};
@@ -258,7 +252,19 @@ struct frame<T, 2>
   
   VESSL_INLINE friend constexpr frame operator^(frame lhs, const frame& rhs)
   {
-    return {lhs.left() ^ rhs.left(), lhs.right() ^ rhs.right()};
+    return { math::xore(lhs.left(), rhs.left()), math::xore(lhs.right(), rhs.right()) };
+  }
+  
+  VESSL_INLINE constexpr frame& operator+=(const frame& rhs)
+  {
+    *this = *this + rhs;
+    return *this;
+  }
+  
+  VESSL_INLINE constexpr frame& operator*=(const T& rhs)
+  {
+    *this = *this * rhs;
+    return *this;
   }
 };
   
@@ -301,7 +307,7 @@ struct frame<T, 3>
   }
     
   VESSL_INLINE frame<T, 1> to_mono() const { return frame<T, 1>((samples[0] + samples[1] + samples[2]) / T(3)); }
-  VESSL_INLINE array<T> as_array() const { return array<T>(samples, 3); }
+  VESSL_INLINE array<T> as_array() const { return array<T>(const_cast<T*>(samples), 3); }
   VESSL_INLINE matrix<T> as_matrix() const { return matrix<T>(samples, 3, 1); }
   
   VESSL_INLINE T& left() { return samples[0]; }
@@ -396,19 +402,19 @@ VESSL_INLINE T vessl::sample::interpolation::cubic<T>::operator()(const T* buffe
 }
 
 template <typename T>
-VESSL_INLINE T vessl::sample::waves::sine<T>::evaluate(phase_t phase) const
+VESSL_INLINE T vessl::sample::waves::bipolar::sine<T>::evaluate(phase_t phase) const
 {
   return math::sin<T>(phase);
 }
 
 template <typename T>
-VESSL_INLINE T vessl::sample::waves::cosine<T>::evaluate(phase_t phase) const
+VESSL_INLINE T vessl::sample::waves::bipolar::cosine<T>::evaluate(phase_t phase) const
 {
   return math::cos<T>(phase);
 }
 
 template <typename T>
-VESSL_INLINE T vessl::sample::waves::triangle<T>::evaluate(phase_t phase) const
+VESSL_INLINE T vessl::sample::waves::bipolar::triangle<T>::evaluate(phase_t phase) const
 {
   size_t wph = static_cast<size_t>(phase) << 1;
   return wph < phase_360 ? math::lerp(T(-1), T(1), static_cast<phase_t>(wph)) 
@@ -416,28 +422,28 @@ VESSL_INLINE T vessl::sample::waves::triangle<T>::evaluate(phase_t phase) const
 }
 
 template <typename T>
-vessl::sample::waves::picket<T>::picket()
-  : attack_len(phase_180)
-  , attack_mult(1.0f / cast<analog_t>(attack_len))
-  , decay_mult(attack_mult)
+vessl::sample::waves::unipolar::triangle<T>::triangle()
+  : attack_len_(phase_180)
+  , attack_mult_(1.0f / cast<analog_t>(attack_len_))
+  , decay_mult_(attack_mult_)
 {
 }
 
 template <typename T>
-VESSL_INLINE T vessl::sample::waves::picket<T>::evaluate(phase_t phase) const
+VESSL_INLINE T vessl::sample::waves::unipolar::triangle<T>::evaluate(phase_t phase) const
 {
   analog_t p = cast<analog_t>(phase);
-  return phase < attack_len ? T(p*attack_mult) : T((1.f - p)*decay_mult);
+  return phase < attack_len_ ? T(p*attack_mult_) : T((1.f - p)*decay_mult_);
 }
 
 template <typename T>
-void vessl::sample::waves::picket<T>::set_pulse_width(phase_t pw)
+void vessl::sample::waves::unipolar::triangle<T>::set_pulse_width(phase_t pw)
 {
   static constexpr phase_t pwlo = cast<phase_t>(0.01f);
   static constexpr phase_t pwhi = cast<phase_t>(0.99f);
-  attack_len = math::constrain(pw, pwlo, pwhi);
-  attack_mult = 1.f / cast<analog_t>(attack_len);
-  decay_mult = 1.f /  cast<analog_t>(phase_360 - attack_len);
+  attack_len_ = math::constrain(pw, pwlo, pwhi);
+  attack_mult_ = 1.f / cast<analog_t>(attack_len_);
+  decay_mult_ = 1.f /  cast<analog_t>(phase_360 - attack_len_);
 }
 
 template <typename T, typename I>

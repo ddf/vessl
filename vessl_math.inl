@@ -37,7 +37,7 @@ VESSL_INLINE sample::frame<T, N> round(sample::frame<T, N> x)
   sample::frame<T, N> result;
   for (size_t i = 0; i < N; i++)
   {
-    result[i] = round(x[i]);
+    result.samples[i] = round(x.samples[i]);
   }
   return result;
 }

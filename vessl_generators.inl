@@ -7,7 +7,7 @@ namespace generators
 template<typename T, typename N>
 VESSL_INLINE T noise<T, N>::generate()
 {
-  step_ += dt_ * rate();
+  step_ += dt_ * params_.rate.value;
   if (step_ >= 1)
   {
     value_ = next_;
@@ -166,7 +166,7 @@ clock<T>::clock(analog_t sample_rate, period_t sample_period_min, period_t sampl
 }
 
 template <typename T>
-parameter clock<T>::tempo() const
+VESSL_INLINE parameter clock<T>::tempo() const
 {
   return parameter("tempo",'t', &tempo_);
 }

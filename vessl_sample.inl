@@ -369,22 +369,22 @@ VESSL_INLINE sample::gain::operator phase_t() const
 } // namespace vessl
 
 template<typename T>
-VESSL_INLINE T vessl::sample::interpolation::nearest<T>::operator()(const T* buffer, analog_t frac_idx)
+VESSL_INLINE T vessl::sample::interpolation::nearest::operator()(const T* buffer, analog_t frac_idx)
 {
-  return buffer[cast<size_t>(math::round(frac_idx))];
+  int idx = static_cast<int>(frac_idx + 0.5f);
+  return buffer[idx];
 }
 
 template<typename T>
-VESSL_INLINE T vessl::sample::interpolation::linear<T>::operator()(const T* buffer, analog_t frac_idx)
+VESSL_INLINE T vessl::sample::interpolation::linear::operator()(const T* buffer, analog_t frac_idx)
 {
-  analog_t idx;
-  analog_t frac = math::mod(frac_idx, &idx);
-  size_t x0 = cast<size_t>(idx);
-  return buffer[x0] + (buffer[x0 + 1] - buffer[x0]) * frac;
+  int idx = static_cast<int>(frac_idx);
+  analog_t frac = frac_idx - idx;
+  return buffer[idx] + (buffer[idx + 1] - buffer[idx]) * frac;
 }
 
 template<typename T>
-VESSL_INLINE T vessl::sample::interpolation::cubic<T>::operator()(const T* buffer, analog_t frac_idx)
+VESSL_INLINE T vessl::sample::interpolation::cubic::operator()(const T* buffer, analog_t frac_idx)
 {
   static constexpr analog_t div6 = (1. / 6.);
   static constexpr analog_t div2 = (0.5);
@@ -446,7 +446,7 @@ void vessl::sample::waves::unipolar::triangle<T>::set_pulse_width(phase_t pw)
   decay_mult_ = 1.f /  cast<analog_t>(phase_360 - attack_len_);
 }
 
-template <typename T, typename I>
+template <typename I, typename T>
 VESSL_INLINE T vessl::sample::read_interpolated(const T *buffer, analog_t frac_idx)
 {
   VASSERT(frac_idx >= 0, "fracIdx argument to sample must be non-negative");
@@ -596,7 +596,7 @@ VESSL_INLINE T delay_line<T>::read(analog_t sample_delay) const
   size_t x2 = (x0 + 2) % size();
   const T* d = data();
   T s[3] = { d[x0], d[x1], d[x2] };
-  return read_interpolated<T, I>(s, f);
+  return read_interpolated<I>(s, f);
 }
 
 template<typename T>
@@ -604,7 +604,7 @@ VESSL_INLINE T delay_line<T>::evaluate(phase_t phase) const
 {
   analog_t size_f = cast<analog_t>(size());
   analog_t sample_delay = cast<analog_t>(phase_360 - phase) * size_f;
-  return read<interpolation::linear<T>>(sample_delay);
+  return read<interpolation::linear>(sample_delay);
 }
 
 } // namesapce sample

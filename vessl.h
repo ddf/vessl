@@ -603,26 +603,27 @@ struct square final : waveform<T>
   
 namespace interpolation
 {
-template<typename T>
 struct nearest
 {
+  template<typename T>
   T operator()(const T* buffer, analog_t frac_idx);
 };
 
-template<typename T>
 struct linear
 {
+  template<typename T>
   T operator()(const T* buffer, analog_t frac_idx);
 };
 
-template<typename T>
 struct cubic
 {
+  template<typename T>
   T operator()(const T* buffer, analog_t frac_idx);
 };
 }
-  
-template<typename T, typename I = interpolation::linear<T>>
+
+// use one of the above structs for I or your own functor that matches the interface.
+template<typename I, typename T>
 T read_interpolated(const T* buffer, analog_t frac_idx);
   
 template<typename T, typename E = math::easing::linear>
@@ -641,7 +642,7 @@ T softclip(T x);
     
 // a fixed-sized buffer that supports sampling it a normalized phase.
 // both positive and negative phases are supported
-template<typename T, size_t N, typename I = interpolation::linear<T>>
+template<typename T, size_t N, typename I = interpolation::linear>
 class wavetable final : public waveform<T>
 {
 public:

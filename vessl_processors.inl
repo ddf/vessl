@@ -26,21 +26,21 @@ VESSL_INLINE T slew<T>::process(const T& v)
   return params_.output.value;
 }
 
-template<typename T, typename I>
-VESSL_INLINE T delay<T, I>::process(const T& in)
+template<typename T>
+VESSL_INLINE T delay<T>::process(const T& in)
 {
   delay_in_samples_ = params_.time.value.samples;
   // delay time in samples
   analog_t dts = math::constrain<analog_t>(delay_in_samples_, 0.f, cast<analog_t>(buffer_.size()-1));
-  analog_t s = buffer_.template read<I>(dts);
+  analog_t s = buffer_.readf(dts);
   analog_t fbk = math::constrain<analog_t>(cast<analog_t>(feedback()), -1.0, 1.0);
   buffer_.write(in + s * fbk);
   return s;
 }
 
-template<typename T, typename I>
+template<typename T>
 template<time::mode TimeMode>
-VESSL_INLINE void delay<T, I>::process(array<T> input, array<T> output)
+VESSL_INLINE void delay<T>::process(array<T> input, array<T> output)
 {
   if (TimeMode == time::mode::snap)
   {
@@ -58,7 +58,7 @@ VESSL_INLINE void delay<T, I>::process(array<T> input, array<T> output)
       delay_in_samples_ = math::lerp(delay_in_samples_, params_.time.value.samples, dst);
       // delay time in samples
       analog_t dts = math::constrain<analog_t>(delay_in_samples_, 0.f, cast<analog_t>(buffer_.size()-1));
-      analog_t wet = buffer_.template read<I>(dts);
+      analog_t wet = buffer_.readf(dts);
       analog_t fbk = math::constrain<analog_t>(cast<analog_t>(feedback()), -1.0, 1.0);
       buffer_.write(in + wet*fbk);
       w << wet;
@@ -83,7 +83,7 @@ VESSL_INLINE void delay<T, I>::process(array<T> input, array<T> output)
     while (r && w)
     {
       T in = r.read();
-      T wet = (1.0f - fade) * buffer_.template read<I>(fts) + fade * buffer_.template read<I>(tts);
+      T wet = (1.0f - fade) * buffer_.readf(fts) + fade * buffer_.readf(tts);
       buffer_.write(in + wet*fbk);
       w << wet;
       fade += fadeInc;
@@ -114,18 +114,18 @@ VESSL_INLINE T follow<T>::process(const T& in)
   return previous_ + (current_ - previous_) * t;
 }
 
-template<typename T, typename I>
-VESSL_INLINE T freeze<T, I>::generate() 
+template<typename T>
+VESSL_INLINE T freeze<T>::generate() 
 {
   freeze_delay_ = cast<analog_t>(position());
   freeze_size_  = params_.duration.value.samples;
   analog_t sampleDelay = freeze_delay_ + (1.0-phase_)*freeze_size_;
   phase_ = math::wrap01(phase_ + rate() / freeze_size_);
-  return delay_line_.template read<I>(sampleDelay);
+  return delay_line_.readf(sampleDelay);
 }
 
-template<typename T, typename I>
-VESSL_INLINE T freeze<T, I>::process(const T& in) 
+template<typename T>
+VESSL_INLINE T freeze<T>::process(const T& in) 
 {
   binary_t is_enabled = cast<binary_t>(enabled());
   crossfade_ = (is_enabled ? 1.0 : 0.0);
@@ -138,9 +138,9 @@ VESSL_INLINE T freeze<T, I>::process(const T& in)
   return wet_level*wet + (1.0 - wet_level)*in;
 }
 
-template<typename T, typename I>
+template<typename T>
 template<time::mode TimeMode, bool UseInput>
-VESSL_INLINE void freeze<T, I>::proc_gen(array<T> input, array<T> output) 
+VESSL_INLINE void freeze<T>::proc_gen(array<T> input, array<T> output) 
 {
   typename array<T>::reader r(input);
   typename array<T>::writer w(output);
@@ -176,7 +176,7 @@ VESSL_INLINE void freeze<T, I>::proc_gen(array<T> input, array<T> output)
       read_rate_ = math::lerp(read_rate_, rt, st*10);
       analog_t sample_delay = freeze_delay_ + (1.0 - phase_)*freeze_size_;
       phase_ = math::wrap01(phase_ + read_rate_/freeze_size_);
-      T wet = delay_line_.template read<I>(sample_delay);
+      T wet = delay_line_.readf(sample_delay);
 
       if (UseInput)
       {
@@ -208,7 +208,7 @@ VESSL_INLINE void freeze<T, I>::proc_gen(array<T> input, array<T> output)
     {
       analog_t sd0 = fd0 + fs0*(1.0f-p0);
       analog_t sd1 = fd1 + fs1*(1.0f-phase_);
-      T wet = (1.0 - fade)*delay_line_.template read<I>(sd0) + fade*delay_line_.template read<I>(sd1);
+      T wet = (1.0 - fade)*delay_line_.readf(sd0) + fade*delay_line_.readf(sd1);
       phase_ = math::wrap01(phase_ + dp1);
       p0 = math::wrap01(p0 + dp0);
       fade += fadeInc;

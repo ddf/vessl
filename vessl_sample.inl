@@ -555,7 +555,7 @@ template<typename T, size_t N, typename I>
 VESSL_INLINE T wavetable<T, N, I>::evaluate(phase_t phase) const
 {
   analog_t idx = cast<analog_t>(phase) * N;
-  return sample::read_interpolated<T, I>(buffer, idx);
+  return sample::read_interpolated<I>(buffer, idx);
 }
 
 template <typename T>

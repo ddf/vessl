@@ -433,7 +433,7 @@ private:
   analog_t dt_;
 };
   
-template<typename T, typename I = sample::interpolation::linear>
+template<typename T>
 class delay : public unit_processor<T>, protected plist<2>
 {
 public:
@@ -532,7 +532,7 @@ private:
 // when used as a generator, it will always generate using the
 // contents of the delayline, enabling it to be used to "freeze"
 // audio that has been recorded elsewhere (e.g. by a delay).
-template<typename T, typename I = sample::interpolation::linear>
+template<typename T>
 class freeze : public unit, public processor<T>, public generator<T>, protected plist<4>
 {
 public:

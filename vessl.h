@@ -577,6 +577,13 @@ struct square final : waveform<T>
 namespace unipolar
 {
 template<typename T>
+struct sine final : waveform<T>
+{
+  // default implementation assumes default parameter type (floating point)
+  T evaluate(phase_t phase) const override;
+};
+
+template<typename T>
 class triangle final : public waveform<T>
 {
 public:
@@ -667,23 +674,26 @@ private:
 
 // aka circular array
 template<typename T>
-class ring_buffer : array<T>
+class ring_buffer : protected array<T>
 {
 public:
-  ring_buffer(T* ring_data, size_t data_size) : array<T>(ring_data, data_size), head_(ring_data + data_size - 1) {}
+  ring_buffer(T* ring_data, size_t data_size);
 
   // expose direct access to underlying array data
   using array<T>::data;
   using array<T>::size;
-
-  void write(const T& v);
-  size_t get_write_index() const { return head_ - array<T>::data_; }
-  void set_write_index(size_t index) { head_ = array<T>::data_ + index%array<T>::size_; }
+  
+  // returns the overwritten value
+  T write(const T& v);
+  [[nodiscard]] size_t get_write_index() const;
+  void set_write_index(size_t index);
 
   ring_buffer operator<<(typename array<T>::reader r);
       
 private:
-  T* head_;
+  using array<T>::data_;
+  using array<T>::size_;
+  size_t write_index_;
 };
   
 template<typename T>
@@ -694,6 +704,7 @@ public:
 
   using ring_buffer<T>::data;
   using ring_buffer<T>::size;
+  using ring_buffer<T>::write;
   using ring_buffer<T>::get_write_index;
   using ring_buffer<T>::set_write_index;
 
@@ -701,9 +712,8 @@ public:
   // where a delay of 0 samples will give the most recently written value.
   T read(size_t sample_delay) const;
 
-  // reads behind the write head with a fractional sampleDelay and given interpolation
-  template<typename I>
-  T read(analog_t sample_delay) const;
+  // reads behind the write head with a fractional sampleDelay and linear interpolation
+  T readf(analog_t sample_delay) const;
 
   // phase will be wrapped to [-1,1] where 0 is the oldest sample recorded
   T evaluate(phase_t phase) const override;

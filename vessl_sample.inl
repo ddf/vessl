@@ -379,7 +379,7 @@ template<typename T>
 VESSL_INLINE T vessl::sample::interpolation::linear::operator()(const T* buffer, analog_t frac_idx)
 {
   int idx = static_cast<int>(frac_idx);
-  analog_t frac = frac_idx - idx;
+  T frac = cast<T>(frac_idx - idx);
   return buffer[idx] + (buffer[idx + 1] - buffer[idx]) * frac;
 }
 
@@ -419,6 +419,13 @@ VESSL_INLINE T vessl::sample::waves::bipolar::triangle<T>::evaluate(phase_t phas
   size_t wph = static_cast<size_t>(phase) << 1;
   return wph < phase_360 ? math::lerp(T(-1), T(1), static_cast<phase_t>(wph)) 
     : math::lerp(T(1), T(-1), static_cast<phase_t>(wph - phase_360));
+}
+
+template <typename T>
+T vessl::sample::waves::unipolar::sine<T>::evaluate(phase_t phase) const
+{
+  static constexpr T half = cast<T>(0.5f);
+  return math::sin<T>(phase)*half + half;
 }
 
 template <typename T>
@@ -551,14 +558,36 @@ VESSL_INLINE T wavetable<T, N, I>::evaluate(phase_t phase) const
   return sample::read_interpolated<T, I>(buffer, idx);
 }
 
-template<typename T>
-VESSL_INLINE void ring_buffer<T>::write(const T& v)
+template <typename T>
+VESSL_INLINE ring_buffer<T>::ring_buffer(T *ring_data, size_t data_size) 
+: array<T>(ring_data, data_size)
+, write_index_(0)
 {
-  *head_++ = v;
-  if (head_ == array<T>::end())
+  
+}
+
+template<typename T>
+VESSL_INLINE T ring_buffer<T>::write(const T& v)
+{
+  T o = data_[write_index_];
+  data_[write_index_++] = v;
+  if (write_index_ == size_)
   {
-    head_ = array<T>::begin();
+    write_index_ = 0;
   }
+  return o;
+}
+
+template <typename T>
+VESSL_INLINE size_t ring_buffer<T>::get_write_index() const
+{
+  return write_index_;
+}
+
+template <typename T>
+VESSL_INLINE void ring_buffer<T>::set_write_index(size_t index)
+{
+  write_index_ = index%size_;
 }
 
 template<typename T>
@@ -575,28 +604,18 @@ VESSL_INLINE ring_buffer<T> ring_buffer<T>::operator<<(typename array<T>::reader
 template<typename T>
 VESSL_INLINE T delay_line<T>::read(size_t sample_delay) const
 {
-  assert(sample_delay < size());
-  sample_delay = size() - 1 - sample_delay;
-  size_t idx = get_write_index() + sample_delay;
-  return data()[idx % size()];
+  //VASSERT(sample_delay < size());
+  size_t sz = size();
+  size_t idx = get_write_index() - sample_delay;
+  return idx < 0 ? data()[idx+sz] : data()[idx];
 }
 
 template<typename T>
-template<typename I>
-VESSL_INLINE T delay_line<T>::read(analog_t sample_delay) const
+VESSL_INLINE T delay_line<T>::readf(analog_t sample_delay) const
 {
-  assert(sample_delay >= 0 && sample_delay < size());
-  analog_t size_f = cast<analog_t>(size());
-  sample_delay = size_f - 1 - sample_delay;
-  analog_t fidx = cast<analog_t>(get_write_index()) + sample_delay;
-  analog_t idx;
-  analog_t f = math::mod(fidx, &idx);
-  size_t x0 = cast<size_t>(idx) % size();
-  size_t x1 = (x0 + 1) % size();
-  size_t x2 = (x0 + 2) % size();
-  const T* d = data();
-  T s[3] = { d[x0], d[x1], d[x2] };
-  return read_interpolated<I>(s, f);
+  analog_t idx = get_write_index() - sample_delay;
+  if (idx < 0) idx += size();
+  return read_interpolated<interpolation::linear>(data(), idx);
 }
 
 template<typename T>
@@ -604,7 +623,7 @@ VESSL_INLINE T delay_line<T>::evaluate(phase_t phase) const
 {
   analog_t size_f = cast<analog_t>(size());
   analog_t sample_delay = cast<analog_t>(phase_360 - phase) * size_f;
-  return read<interpolation::linear>(sample_delay);
+  return readf(sample_delay);
 }
 
 } // namesapce sample

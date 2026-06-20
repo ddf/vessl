@@ -263,7 +263,8 @@ struct frame<T, 2>
   
   VESSL_INLINE constexpr frame& operator*=(const T& rhs)
   {
-    *this = *this * rhs;
+    samples[0] *= rhs;
+    samples[1] *= rhs;
     return *this;
   }
 };
@@ -454,7 +455,7 @@ void vessl::sample::waves::unipolar::triangle<T>::set_pulse_width(phase_t pw)
 }
 
 template <typename I, typename T>
-VESSL_INLINE T vessl::sample::read_interpolated(const T *buffer, analog_t frac_idx)
+VESSL_INLINE T vessl::sample::readf(const T *buffer, analog_t frac_idx)
 {
   VASSERT(frac_idx >= 0, "fracIdx argument to sample must be non-negative");
   static I interpolator;
@@ -555,7 +556,7 @@ template<typename T, size_t N, typename I>
 VESSL_INLINE T wavetable<T, N, I>::evaluate(phase_t phase) const
 {
   analog_t idx = cast<analog_t>(phase) * N;
-  return sample::read_interpolated<I>(buffer, idx);
+  return sample::readf<I>(buffer, idx);
 }
 
 template <typename T>
@@ -615,7 +616,7 @@ VESSL_INLINE T delay_line<T>::readf(analog_t sample_delay) const
 {
   analog_t idx = get_write_index() - sample_delay;
   if (idx < 0) idx += size();
-  return read_interpolated<interpolation::linear>(data(), idx);
+  return sample::readf<interpolation::linear>(data(), idx);
 }
 
 template<typename T>

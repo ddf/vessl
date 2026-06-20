@@ -631,7 +631,7 @@ struct cubic
 
 // use one of the above structs for I or your own functor that matches the interface.
 template<typename I, typename T>
-T read_interpolated(const T* buffer, analog_t frac_idx);
+T readf(const T* buffer, analog_t frac_idx);
   
 template<typename T, typename E = math::easing::linear>
 T crossfade(T a, T b, analog_t f);

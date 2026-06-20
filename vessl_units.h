@@ -731,22 +731,26 @@ public:
   explicit limiter(gain_t pre_gain = gain_t::from_decibels(0)) : unit_processor<T>()
   {
     params_.pre_gain.value = pre_gain;
-    params_.peak.value = 0.5;
+    params_.peak.value = T(0.5f);
   }
-    
-  const parameter_list& parameters() const override { return *this; }
 
-  parameter pre_gain() const { return params_.pre_gain("pre-gain", 'g'); }
-  parameter peak() const { return params_.peak("peak", 'k'); }
+  [[nodiscard]] const parameter_list& parameters() const override { return *this; }
+
+  [[nodiscard]] parameter pre_gain() const { return params_.pre_gain("pre-gain", 'g'); }
+  [[nodiscard]] parameter peak() const { return params_.peak("peak", 'k'); }
 
   T process(const T& in) override;
   using unit_processor<T>::process;
     
 protected:
-  parameter element_at(size_t index) const override
+  [[nodiscard]] parameter element_at(size_t index) const override
   {
-    parameter p[num] = { pre_gain(), peak() };
-    return p[index];
+    switch (index)
+    {
+      case 0: return pre_gain();
+      case 1: return peak();
+      default: return parameter::none();
+    }
   }
     
 private:

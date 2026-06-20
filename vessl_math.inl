@@ -79,6 +79,21 @@ VESSL_INLINE analog_t smoothstep::operator()(analog_t t) const
   return t * t * (3.0f - 2.0f * t);
 }
 
+VESSL_INLINE analog_t quart::in::operator()(analog_t t) const
+{
+  return t*t*t*t;
+}
+
+VESSL_INLINE analog_t quart::out::operator()(analog_t t) const
+{
+  return 1.f - pow<analog_t>(1.f - t, 4.f);
+}
+
+VESSL_INLINE analog_t quart::in_out::operator()(analog_t t) const
+{
+  return t < 0.5f ? 8.f * t * t * t * t : 1.f - pow<analog_t>(-2.f * t + 2.f, 4.f) * 0.5f;
+}
+
 VESSL_INLINE analog_t expo::in::operator()(analog_t t) const
 {
   return t <= epsilon<analog_t>() ? 0 : pow<analog_t>(2, 10*t-10);

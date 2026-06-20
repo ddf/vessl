@@ -229,6 +229,13 @@ struct in_out { analog_t operator()(analog_t t) const; };
 struct out_in { analog_t operator()(analog_t t) const; };
 }
 
+namespace quart
+{
+struct in { analog_t operator()(analog_t t) const; };
+struct out { analog_t operator()(analog_t t) const; };
+struct in_out { analog_t operator()(analog_t t) const; };
+}
+
 namespace expo
 {
 struct in { analog_t operator()(analog_t t) const; };

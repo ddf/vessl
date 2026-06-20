@@ -696,6 +696,9 @@ public:
   void set_write_index(size_t index);
 
   ring_buffer operator<<(typename array<T>::reader r);
+  
+  // crossfade between the contents of the buffer and v by crossfade amount.
+  void overdub(const T& v, analog_t crossfade_amount, size_t write_offset);
       
 private:
   using array<T>::data_;

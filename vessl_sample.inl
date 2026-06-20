@@ -149,32 +149,62 @@ struct frame<T, 1>
   VESSL_INLINE T& value() { return samples[0]; }
   VESSL_INLINE const T& value() const { return samples[0]; }
   
-  friend constexpr frame operator+(frame lhs, const frame& rhs)
+  VESSL_INLINE frame& operator+=(const frame& rhs)
+  {
+    samples[0] += rhs.samples[0];
+    return *this;
+  }
+  
+  VESSL_INLINE frame& operator-=(const frame& rhs)
+  {
+    samples[0] -= rhs.samples[0];
+    return *this;
+  }
+  
+  VESSL_INLINE frame& operator*=(const frame& rhs)
+  {
+    samples[0] *= rhs.samples[0];
+    return *this;
+  }
+  
+  VESSL_INLINE frame& operator/=(const frame& rhs)
+  {
+    samples[0] /= rhs.samples[0];
+    return *this;
+  }
+  
+  VESSL_INLINE frame& operator^=(const frame& rhs)
+  {
+    samples[0] ^= rhs.samples[0];
+    return *this;
+  }
+  
+  VESSL_INLINE friend constexpr frame operator+(frame lhs, const frame& rhs)
   {
     return frame(lhs.value() + rhs.value());
   }
   
-  friend constexpr frame operator-(frame lhs, const frame& rhs)
+  VESSL_INLINE friend constexpr frame operator-(frame lhs, const frame& rhs)
   {
     return frame(lhs.value() - rhs.value());
   }
   
-  friend constexpr frame operator*(frame lhs, const frame& rhs)
+  VESSL_INLINE friend constexpr frame operator*(frame lhs, const frame& rhs)
   {
     return frame(lhs.value() * rhs.value());
   }
   
-  friend constexpr frame operator*(frame lhs, const T& rhs)
+  VESSL_INLINE friend constexpr frame operator*(frame lhs, const T& rhs)
   {
     return frame(lhs.value() * rhs);
   }
   
-  friend constexpr frame operator*(T lhs, const frame& rhs)
+  VESSL_INLINE friend constexpr frame operator*(T lhs, const frame& rhs)
   {
     return frame(lhs * rhs.value());
   }
   
-  friend constexpr frame operator^(frame lhs, const frame& rhs)
+  VESSL_INLINE friend constexpr frame operator^(frame lhs, const frame& rhs)
   {
     return frame(lhs.value() ^ rhs.value());
   }
@@ -225,6 +255,19 @@ struct frame<T, 2>
   VESSL_INLINE T& right() { return samples[1]; }
   VESSL_INLINE const T& right() const { return samples[1]; }
   
+  VESSL_INLINE constexpr frame& operator+=(const frame& rhs)
+  {
+    *this = *this + rhs;
+    return *this;
+  }
+  
+  VESSL_INLINE constexpr frame& operator*=(const T& rhs)
+  {
+    samples[0] *= rhs;
+    samples[1] *= rhs;
+    return *this;
+  }
+  
   VESSL_INLINE friend constexpr frame operator+(frame lhs, const frame& rhs)
   {
     return {lhs.left() + rhs.left(), lhs.right() + rhs.right()};
@@ -253,19 +296,6 @@ struct frame<T, 2>
   VESSL_INLINE friend constexpr frame operator^(frame lhs, const frame& rhs)
   {
     return { math::xore(lhs.left(), rhs.left()), math::xore(lhs.right(), rhs.right()) };
-  }
-  
-  VESSL_INLINE constexpr frame& operator+=(const frame& rhs)
-  {
-    *this = *this + rhs;
-    return *this;
-  }
-  
-  VESSL_INLINE constexpr frame& operator*=(const T& rhs)
-  {
-    samples[0] *= rhs;
-    samples[1] *= rhs;
-    return *this;
   }
 };
   
@@ -602,19 +632,27 @@ VESSL_INLINE ring_buffer<T> ring_buffer<T>::operator<<(typename array<T>::reader
   return *this;
 }
 
+template <typename T>
+void ring_buffer<T>::overdub(const T &v, analog_t crossfade_amount, size_t write_offset)
+{
+  size_t idx = get_write_index() + write_offset;
+  if (idx >= size_) idx %= size_;
+  data_[idx] = crossfade(data_[idx], v, crossfade_amount);
+}
+
 template<typename T>
 VESSL_INLINE T delay_line<T>::read(size_t sample_delay) const
 {
   //VASSERT(sample_delay < size());
   size_t sz = size();
   size_t idx = get_write_index() - sample_delay;
-  return idx < 0 ? data()[idx+sz] : data()[idx];
+  return idx >= sz ? data()[idx%sz] : data()[idx];
 }
 
 template<typename T>
 VESSL_INLINE T delay_line<T>::readf(analog_t sample_delay) const
 {
-  analog_t idx = get_write_index() - sample_delay;
+  analog_t idx = static_cast<analog_t>(get_write_index()) - sample_delay;
   if (idx < 0) idx += size();
   return sample::readf<interpolation::linear>(data(), idx);
 }

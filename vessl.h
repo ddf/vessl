@@ -639,9 +639,10 @@ struct cubic
 // use one of the above structs for I or your own functor that matches the interface.
 template<typename I, typename T>
 T readf(const T* buffer, analog_t frac_idx);
-  
+
+// crossfade between a and b, put the result in c.
 template<typename T, typename E = math::easing::linear>
-T crossfade(T a, T b, analog_t f);
+void crossfade(const T& a, const T& b, analog_t f, T* c);
 
 template<typename T, size_t N, typename E = math::easing::linear>
 void spatialize(const T& sample, analog_t pan, frame<T,N>* out_frame);
@@ -697,8 +698,12 @@ public:
 
   ring_buffer operator<<(typename array<T>::reader r);
   
-  // crossfade between the contents of the buffer and v by crossfade amount.
-  void overdub(const T& v, analog_t crossfade_amount, size_t write_offset);
+  // add v to the buffer contents write_offset in front of the write head.
+  // return the value that results.
+  T overdub(const T& v, size_t write_offset);
+  
+  // overwrites the value in the buffer at write_offset without moving the write head
+  void overwrite(const T& v, size_t write_offset);
       
 private:
   using array<T>::data_;

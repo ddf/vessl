@@ -498,7 +498,7 @@ VESSL_INLINE T vessl::sample::readf(const T *buffer, analog_t frac_idx)
   return interpolator(buffer, frac_idx);
 }
 
-template <typename T, typename E>
+template <typename E, typename T>
 VESSL_INLINE void vessl::sample::crossfade(const T& a, const T& b, analog_t f, T* c)
 {
   static E ease;
@@ -508,6 +508,12 @@ VESSL_INLINE void vessl::sample::crossfade(const T& a, const T& b, analog_t f, T
   *c *= ease(1.0f - f);
   // constructs a T
   *c += b*ease(f);
+}
+
+template <typename T>
+VESSL_INLINE void vessl::sample::crossfade(const T &a, const T &b, analog_t f, T *c)
+{
+  return crossfade<math::easing::linear>(a, b, f, c);
 }
 
 // tried providing this very specific specialization to see if it would improve performance 

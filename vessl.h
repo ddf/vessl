@@ -511,6 +511,7 @@ struct type
   using vector3 = frame<T,3>;
 };
   
+// @todo switch to storing as scale since that's what we generally need when applying gain.
 // stored as decibels (0 = unity gain).
 struct gain
 {
@@ -641,7 +642,14 @@ template<typename I, typename T>
 T readf(const T* buffer, analog_t frac_idx);
 
 // crossfade between a and b, put the result in c.
-template<typename T, typename E = math::easing::linear>
+// E should be one of the functors from math::easing,
+// or any functor that implements a templated function call override.
+template<typename E, typename T>
+void crossfade(const T& a, const T& b, analog_t f, T* c);
+
+// crossfade between a and b, put the result in c.
+// Use a linear crossfade.
+template<typename T>
 void crossfade(const T& a, const T& b, analog_t f, T* c);
 
 template<typename T, size_t N, typename E = math::easing::linear>

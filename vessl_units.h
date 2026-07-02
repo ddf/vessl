@@ -570,16 +570,16 @@ public:
 
   T process(const T& in) override;
 
-  void process(source<T>& source, sink<T>& sink) override { processor<T>::process(source, sink); }
+  VESSL_INLINE void process(source<T>& source, sink<T>& sink) override { processor<T>::process(source, sink); }
     
   template<time::mode TimeMode = time::mode::slew>
-  void generate(array<T> output) { proc_gen<TimeMode, false>(output, output); }
+  VESSL_INLINE void generate(array<T> output) { proc_gen<TimeMode, false>(output, output); }
 
   template<time::mode TimeMode = time::mode::slew>
-  void process(array<T> input, array<T> output) { proc_gen<TimeMode, true>(input, output); }
+  VESSL_INLINE void process(array<T> input, array<T> output) { proc_gen<TimeMode, true>(input, output); }
     
 protected:
-  parameter element_at(size_t index) const override
+  VESSL_INLINE parameter element_at(size_t index) const override
   {
     parameter p[num] = { enabled(), position(), duration(), rate() };
     return p[index];

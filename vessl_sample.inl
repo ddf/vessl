@@ -693,9 +693,13 @@ VESSL_INLINE T delay_line<T>::read(size_t sample_delay) const
 template<typename T>
 VESSL_INLINE T delay_line<T>::readf(analog_t sample_delay) const
 {
-  analog_t idx = static_cast<analog_t>(get_write_index()) - sample_delay;
-  if (idx < 0) idx += size();
-  return sample::readf<interpolation::linear>(data(), idx);
+  const size_t sz = size();
+  const analog_t widx = get_write_index();
+  const analog_t idx = sample_delay <= widx ? widx - sample_delay : widx + sz - sample_delay;
+  const size_t lidx = static_cast<size_t>(idx);
+  const size_t hidx = (lidx+1) % sz;
+  const analog_t t = idx - lidx;
+  return math::lerp(data()[lidx], data()[hidx], t);
 }
 
 template<typename T>

@@ -74,6 +74,13 @@ namespace vessl
       return *this; 
     }
     VESSL_INLINE friend q31 operator*(q31 lhs, const q31& rhs) { lhs *= rhs; return lhs; }
+    
+    VESSL_INLINE q31& operator^=(const q31& rhs)
+    {
+      v_ = v_ ^ rhs.v_;
+      return *this;
+    }
+    VESSL_INLINE friend q31 operator^(q31 lhs, const q31& rhs) { lhs ^= rhs; return lhs; }
 
     template<typename T>
     [[nodiscard]] VESSL_INLINE q31 scaled(T factor) const

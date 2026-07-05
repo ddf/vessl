@@ -114,6 +114,27 @@ VESSL_INLINE T follow<T>::process(const T& in)
   return previous_ + (current_ - previous_) * t;
 }
 
+template <typename T>
+typename processor<T>::output_t peak_meter<T>::process(const typename processor<T>::input_t &in)
+{  
+  T peak = math::abs(in);
+  T error = peak - params_.peak.value;
+  params_.peak.value += (error > T(0)) ? T(0.05) : T(0.00002) * error;
+  return params_.peak.value;
+}
+
+template<typename T>
+VESSL_INLINE T limiter<T>::process(const T& in)
+{
+  T pre = in*params_.pre_gain.value.to_scale();
+  T peak = peak_meter<T>::process(in);
+  analog_t gain = (peak <= 1.0 ? 1.0 : 1.0 / peak);
+  // DaisySP returns this, which sounds better for how I typically use this.
+  return sample::softlimit(pre*gain*0.7);
+  // stmlib returns this, which clips more easily, but is faster.
+  //return pre*gain*0.8;
+}
+
 template<typename T>
 VESSL_INLINE T freeze<T>::generate() 
 {
@@ -256,20 +277,6 @@ VESSL_INLINE T bitcrush<T, MaxBits>::process(const T& in)
   }
   prev_input_ = in;
   return val * (1.0 / scalar);
-}
-
-template<typename T>
-VESSL_INLINE T limiter<T>::process(const T& in)
-{
-  T pre = in*params_.pre_gain.value.to_scale();
-  T peak = math::abs(pre);
-  T error = peak - params_.peak.value;
-  params_.peak.value += (error > T(0)) ? T(0.05) : T(0.00002) * error;
-  analog_t gain = (params_.peak.value <= 1.0 ? 1.0 : 1.0 / params_.peak.value);
-  // DaisySP returns this, which sounds better for how I typically use this.
-  return sample::softlimit(pre*gain*0.7);
-  // stmlib returns this, which clips more easily, but is faster.
-  //return pre*gain*0.8;
 }
 } // namespace processors
 } // namespace vessl

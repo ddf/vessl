@@ -28,7 +28,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
-#include <limits>
+#include <climits>
 #include <utility>
 
 // because some people like to redefine these math functions with macros
@@ -1216,6 +1216,14 @@ struct plist : parameter_list
 {
   static constexpr size_t num = N;
   VESSL_INLINE size_t size() const override { return N; }
+};
+
+template<>
+struct plist<0> : parameter_list
+{
+  VESSL_INLINE size_t size() const override { return 0; }
+protected:
+  [[nodiscard]] parameter element_at(size_t index) const override { return parameter::none(); }
 };
   
 template<typename T>

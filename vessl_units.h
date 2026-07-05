@@ -523,6 +523,65 @@ private:
   T previous_;
   T current_;
 };
+
+template<typename T>
+class peak_meter : public unit_processor<T>, protected plist<1>
+{
+public:
+  
+  [[nodiscard]] const parameter_list & parameters() const override { return *this; }
+  [[nodiscard]] parameter peak() const { return params_.peak("peak", 'k'); }
+  typename processor<T>::output_t process(const typename processor<T>::input_t &in) override;
+  
+protected:
+  [[nodiscard]] VESSL_INLINE parameter element_at(size_t index) const override
+  {
+    return index == 0 ? peak() : parameter::none();
+  }
+  
+private:
+  struct 
+  {
+    param<T> peak;
+  } params_;
+};
+
+// A simple peak limiter adapted from pinchenettes/stmlib via DaisySP
+template<typename T>
+class limiter : public peak_meter<T>
+{
+public:
+  explicit limiter(gain_t pre_gain = gain_t::from_decibels(0))
+  {
+    params_.pre_gain.value = pre_gain;
+  }
+
+  [[nodiscard]] const parameter_list& parameters() const override { return *this; }
+
+  [[nodiscard]] parameter pre_gain() const { return params_.pre_gain("pre-gain", 'g'); }
+  using peak_meter<T>::peak;
+
+  T process(const T& in) override;
+  using unit_processor<T>::process;
+    
+protected:
+  [[nodiscard]] VESSL_INLINE size_t size() const override { return 2; }
+  [[nodiscard]] parameter element_at(size_t index) const override
+  {
+    switch (index)
+    {
+    case 0: return pre_gain();
+    case 1: return peak();
+    default: return parameter::none();
+    }
+  }
+    
+private:
+  struct
+  {
+    gain_p pre_gain;
+  } params_;
+};
   
 // when used as a processor, will write incoming audio to the delayline
 // and output the incoming signal if freeze is not engaged.
@@ -723,43 +782,6 @@ private:
   analog_t dt_;
 };
 
-// A simple peak limiter adapted from pinchenettes/stmlib via DaisySP
-template<typename T>
-class limiter : public unit_processor<T>, protected plist<2>
-{
-public:
-  explicit limiter(gain_t pre_gain = gain_t::from_decibels(0)) : unit_processor<T>()
-  {
-    params_.pre_gain.value = pre_gain;
-    params_.peak.value = T(0.5f);
-  }
-
-  [[nodiscard]] const parameter_list& parameters() const override { return *this; }
-
-  [[nodiscard]] parameter pre_gain() const { return params_.pre_gain("pre-gain", 'g'); }
-  [[nodiscard]] parameter peak() const { return params_.peak("peak", 'k'); }
-
-  T process(const T& in) override;
-  using unit_processor<T>::process;
-    
-protected:
-  [[nodiscard]] parameter element_at(size_t index) const override
-  {
-    switch (index)
-    {
-      case 0: return pre_gain();
-      case 1: return peak();
-      default: return parameter::none();
-    }
-  }
-    
-private:
-  struct
-  {
-    gain_p pre_gain;
-    param<T> peak;
-  } params_;
-};
 } // namespace processors
 } // namespace vessl
 

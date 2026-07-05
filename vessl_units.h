@@ -698,30 +698,9 @@ public:
   // unused by some filter types (see filtering section)
   parameter emphasis() const { return params_.emphasis("emphasis", 'e'); }
     
-  T process(const T& in) override
-  {
-    T out;
-    filtering::args fargs(
-      sample_rate_,
-      params_.fhz.value,
-      math::max(params_.q.value, 0.01),
-      params_.emphasis.value
-    );
-    func_.process(&in, &out, 1, fargs);
-    return out;
-  }
-    
-  void process(array<T> in, array<T> out) override
-  {
-    filtering::args fargs(
-      sample_rate_,
-      params_.fhz.value,
-      math::max(params_.q.value, 0.01f),
-      params_.emphasis.value
-    );
-    func_.process(in.data(), out.data(), in.size(), fargs);
-  }
-    
+  T process(const T& in) override;
+  void process(array<T> in, array<T> out) override;
+
 protected:
   parameter element_at(size_t index) const override
   {

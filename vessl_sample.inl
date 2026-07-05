@@ -6,25 +6,25 @@ namespace sample
 {
 
 template <typename T, size_t N>
-frame<T, N>::frame()
+VESSL_INLINE frame<T, N>::frame()
 {
   as_array().fill(0);
 }
 
 template <typename T, size_t N>
-frame<T, N>::frame(T m): array<T>(samples, N)
+VESSL_INLINE frame<T, N>::frame(T m): array<T>(samples, N)
 {
   as_array().fill(m);
 }
 
 template <typename T, size_t N>
-frame<T, N>::frame(const frame &other): array<T>(samples, N)
+VESSL_INLINE frame<T, N>::frame(const frame &other): array<T>(samples, N)
 {
   other.as_array().copy_to(this->as_array());
 }
 
 template <typename T, size_t N>
-frame<T, N>& frame<T, N>::operator=(const frame& rhs)
+VESSL_INLINE frame<T, N>& frame<T, N>::operator=(const frame& rhs)
 {
   if (this == &rhs)
   {
@@ -36,7 +36,7 @@ frame<T, N>& frame<T, N>::operator=(const frame& rhs)
 }
 
 template <typename T, size_t N>
-frame<T, 1> frame<T, N>::to_mono() const
+VESSL_INLINE frame<T, 1> frame<T, N>::to_mono() const
 {
   T sum = 0;
   for (size_t c = 0; c < N; ++c)
@@ -47,15 +47,24 @@ frame<T, 1> frame<T, N>::to_mono() const
 }
 
 template <typename T, size_t N>
-array<T> frame<T, N>::as_array() const
+VESSL_INLINE array<T> frame<T, N>::as_array() const
 {
   return array<T>(samples, N);
 }
 
 template <typename T, size_t N>
-matrix<T> frame<T, N>::as_matrix() const
+VESSL_INLINE matrix<T> frame<T, N>::as_matrix() const
 {
   return matrix<T>(const_cast<T*>(samples), N, 1);
+}
+
+template <typename T, size_t N>
+VESSL_INLINE void frame<T, N>::spatialize(const frame &in, frame *out) const
+{
+  for (int i = 0; i < N; ++i)
+  {
+    out->samples[i] = in.samples[i] * samples[i];
+  }
 }
 
 template<typename T, size_t N>
@@ -145,6 +154,11 @@ struct frame<T, 1>
   VESSL_INLINE frame to_mono() const { return frame(samples[0]); }
   VESSL_INLINE array<T> as_array() const { return array<T>(samples, 1); }
   VESSL_INLINE matrix<T> as_matrix() const { return matrix<T>(samples, 1, 1); }
+  
+  VESSL_INLINE void spatialize(const frame &in, frame *out) const
+  {
+      out->samples[0] = in.samples[0] * samples[0];
+  }
 
   VESSL_INLINE T& value() { return samples[0]; }
   VESSL_INLINE const T& value() const { return samples[0]; }
@@ -255,6 +269,12 @@ struct frame<T, 2>
   VESSL_INLINE frame<T, 1> to_mono() const { return frame<T, 1>((samples[0] + samples[1]) * 0.5f); }
   VESSL_INLINE array<T> as_array() const { return array<T>(samples, 2); }
   VESSL_INLINE matrix<T> as_matrix() const { return matrix<T>(samples, 2, 1); }
+  
+  VESSL_INLINE void spatialize(const frame &in, frame *out) const
+  {
+    out->samples[0] = in.samples[0] * samples[0];
+    out->samples[1] = in.samples[1] * samples[1];
+  }
 
   VESSL_INLINE T& left() { return samples[0]; }
   VESSL_INLINE const T& left() const { return samples[0]; }
@@ -346,6 +366,13 @@ struct frame<T, 3>
   VESSL_INLINE frame<T, 1> to_mono() const { return frame<T, 1>((samples[0] + samples[1] + samples[2]) / T(3)); }
   VESSL_INLINE array<T> as_array() const { return array<T>(const_cast<T*>(samples), 3); }
   VESSL_INLINE matrix<T> as_matrix() const { return matrix<T>(samples, 3, 1); }
+  
+  VESSL_INLINE void spatialize(const frame &in, frame *out) const
+  {
+    out->samples[0] = in.samples[0] * samples[0];
+    out->samples[1] = in.samples[1] * samples[1];
+    out->samples[2] = in.samples[2] * samples[2];
+  }
   
   VESSL_INLINE T& left() { return samples[0]; }
   VESSL_INLINE const T& left() const { return samples[0]; }
@@ -530,8 +557,9 @@ VESSL_INLINE void vessl::sample::crossfade(const T &a, const T &b, analog_t f, T
 //   c->samples[1] = a.samples[1]*g + b.samples[1]*f;
 // }
 
+
 template <typename T, vessl::size_t N, typename E>
-VESSL_INLINE void vessl::sample::spatialize(const T& sample, analog_t pan, frame<T,N>* out_frame)
+VESSL_INLINE void vessl::sample::make_spatializer(analog_t balance, frame<T, N> *out_spatializer)
 {
   static E ease;
   
@@ -540,10 +568,17 @@ VESSL_INLINE void vessl::sample::spatialize(const T& sample, analog_t pan, frame
   for (size_t i = 0; i < N; ++i)
   {
     const analog_t p = -1 + 2*static_cast<float>(i) / (N-1);
-    const analog_t d = math::abs(pan - p)*0.5f;
+    const analog_t d = math::abs(balance - p)*0.5f;
     const analog_t a = 1.0f - d;
-    out_frame->samples[i] = sample * ease(a);
+    out_spatializer->samples[i] = ease(a);
   }
+}
+
+template <typename T, vessl::size_t N, typename E>
+VESSL_INLINE void vessl::sample::spatialize(const T& sample, analog_t pan, frame<T,N>* out_frame)
+{
+  make_spatializer(pan, out_frame);
+  *out_frame *= sample;
 }
 
 template <typename T>

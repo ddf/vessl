@@ -482,6 +482,9 @@ struct frame
   // matrix view of this frame
   matrix<T> as_matrix() const;
   
+  // treat this frame as a spatializer and use it to spatialize in, putting the result in out.
+  void spatialize(const frame& in, frame* out) const;
+  
   template<typename Ft, size_t Fn>
   friend constexpr frame operator+(frame lhs, const frame& rhs);
   
@@ -652,8 +655,18 @@ void crossfade(const T& a, const T& b, analog_t f, T* c);
 template<typename T>
 void crossfade(const T& a, const T& b, analog_t f, T* c);
 
+// mix a mono sample up to a multi-channel frame.
+// pan [-1,1]: placement of the mono sample in the multi-channel frame,
+// where -1 is only in the first channel, 1 is only in the last channel
+// and 0 "centered" (which will depend on the number of channels and easing).
 template<typename T, size_t N, typename E = math::easing::linear>
 void spatialize(const T& sample, analog_t pan, frame<T,N>* out_frame);
+
+// fills out_spatializer with values such that when multiplied
+// with a frame that has the same number of channels, 
+// it will rebalance the target frame.
+template<typename T, size_t N, typename E = math::easing::linear>
+void make_spatializer(analog_t balance, frame<T,N>* out_spatializer);
   
 // lovingly borrowed from pichenettes/stmlib
 template<typename T>
@@ -845,7 +858,7 @@ struct biquad
   struct flt
   {
     df2t<T, CoGen> df2;
-    void process(const T* source, T* dest, size_t block_size, const args& args)
+    VESSL_INLINE void process(const T* source, T* dest, size_t block_size, const args& args)
     {
       df2.process(source, dest, block_size, args);
     }

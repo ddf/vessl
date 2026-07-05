@@ -30,7 +30,7 @@ namespace vessl
 {
 template<size_t Stages>
 template<typename T, class CoGen>
-void filtering::biquad<Stages>::df2t<T, CoGen>::process(const T* source, T* dest, size_t block_size, const args& args)
+VESSL_INLINE void filtering::biquad<Stages>::df2t<T, CoGen>::process(const T* source, T* dest, size_t block_size, const args& args)
 {
   // update our coefficients
   using cascade_t = cascade<T,2>;
@@ -65,7 +65,7 @@ void filtering::biquad<Stages>::df2t<T, CoGen>::process(const T* source, T* dest
 
 template<size_t Stages>
 template<typename T>
-void filtering::biquad<Stages>::copy(T* coeff) 
+VESSL_INLINE void filtering::biquad<Stages>::copy(T* coeff) 
 {
   if (Stages > 1)
   {
@@ -79,7 +79,7 @@ void filtering::biquad<Stages>::copy(T* coeff)
 }
 
 template<size_t Stages>
-void filtering::biquad<Stages>::lpcg::operator()(analog_t* coeff, analog_t omega, analog_t q, gain_t _) const
+VESSL_INLINE void filtering::biquad<Stages>::lpcg::operator()(analog_t* coeff, analog_t omega, analog_t q, gain_t _) const
 {
   analog_t K = math::tan(omega);
   analog_t A = 1 / (1 + K / q + K * K);
@@ -92,7 +92,7 @@ void filtering::biquad<Stages>::lpcg::operator()(analog_t* coeff, analog_t omega
 }
 
 template<size_t Stages>
-void filtering::biquad<Stages>::hpcg::operator()(analog_t* coeff, analog_t omega, analog_t q, gain_t _) const
+VESSL_INLINE void filtering::biquad<Stages>::hpcg::operator()(analog_t* coeff, analog_t omega, analog_t q, gain_t _) const
 {
   analog_t K = math::tan(omega);
   analog_t A = 1 / (1 + K / q + K * K);
@@ -105,7 +105,7 @@ void filtering::biquad<Stages>::hpcg::operator()(analog_t* coeff, analog_t omega
 }
 
 template<size_t Stages>
-void filtering::biquad<Stages>::bpcg::operator()(analog_t* coeff, analog_t omega, analog_t q, gain_t _) const
+VESSL_INLINE void filtering::biquad<Stages>::bpcg::operator()(analog_t* coeff, analog_t omega, analog_t q, gain_t _) const
 {
   analog_t K = math::tan(omega);
   analog_t A = 1 / (1 + K / q + K * K);
@@ -118,7 +118,7 @@ void filtering::biquad<Stages>::bpcg::operator()(analog_t* coeff, analog_t omega
 }
 
 template<size_t Stages>
-void filtering::biquad<Stages>::ntcg::operator()(analog_t* coeff, analog_t omega, analog_t q, gain_t _) const
+VESSL_INLINE void filtering::biquad<Stages>::ntcg::operator()(analog_t* coeff, analog_t omega, analog_t q, gain_t _) const
 {
   analog_t K = math::tan(omega);
   analog_t A = 1 / (1 + K / q + K * K);
@@ -131,7 +131,7 @@ void filtering::biquad<Stages>::ntcg::operator()(analog_t* coeff, analog_t omega
 }
 
 template<size_t Stages>
-void filtering::biquad<Stages>::pkcg::operator()(analog_t* coeff, analog_t omega, analog_t q, gain_t g) const
+VESSL_INLINE void filtering::biquad<Stages>::pkcg::operator()(analog_t* coeff, analog_t omega, analog_t q, gain_t g) const
 {
   analog_t K = math::tan(omega);
   analog_t V = math::exp10(math::abs(g.to_decibels())/20);
@@ -158,7 +158,7 @@ void filtering::biquad<Stages>::pkcg::operator()(analog_t* coeff, analog_t omega
 }
 
 template<size_t Stages>
-void filtering::biquad<Stages>::lscg::operator()(analog_t* coeff, analog_t omega, analog_t _, gain_t g) const
+VESSL_INLINE void filtering::biquad<Stages>::lscg::operator()(analog_t* coeff, analog_t omega, analog_t _, gain_t g) const
 {
   analog_t K = math::tan(omega);
   analog_t V = math::exp10(math::abs(g.to_decibels())/20);
@@ -185,7 +185,7 @@ void filtering::biquad<Stages>::lscg::operator()(analog_t* coeff, analog_t omega
 }
 
 template<size_t Stages>
-void filtering::biquad<Stages>::hscg::operator()(analog_t* coeff, analog_t omega, analog_t _, gain_t g) const
+VESSL_INLINE void filtering::biquad<Stages>::hscg::operator()(analog_t* coeff, analog_t omega, analog_t _, gain_t g) const
 {
   analog_t K = math::tan(omega);
   analog_t V = math::exp10(math::abs(g.to_decibels())/20);

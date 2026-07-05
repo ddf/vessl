@@ -258,6 +258,32 @@ VESSL_INLINE void freeze<T>::proc_gen(array<T> input, array<T> output)
   }
 }
 
+template <typename T, template <typename> class H>
+VESSL_INLINE T filter<T, H>::process(const T &in)
+{
+  T out;
+  filtering::args fargs(
+      sample_rate_,
+      params_.fhz.value,
+      math::max(params_.q.value, 0.01),
+      params_.emphasis.value
+      );
+  func_.process(&in, &out, 1, fargs);
+  return out;
+}
+
+template <typename T, template <typename> class H>
+VESSL_INLINE void filter<T, H>::process(array<T> in, array<T> out)
+{
+  filtering::args fargs(
+      sample_rate_,
+      params_.fhz.value,
+      math::max(params_.q.value, 0.01f),
+      params_.emphasis.value
+      );
+  func_.process(in.data(), out.data(), in.size(), fargs);
+}
+
 template<typename T, uint32_t MaxBits>
 VESSL_INLINE T bitcrush<T, MaxBits>::process(const T& in)
 {

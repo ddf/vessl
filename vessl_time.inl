@@ -4,6 +4,11 @@ namespace vessl
 {
 namespace time
 {
+VESSL_INLINE duration::operator bool() const
+{
+  return math::abs(samples) >= math::epsilon<analog_t>();
+}
+
 VESSL_INLINE clockable::clockable(analog_t sample_rate, period_t sample_period_min, period_t sample_period_max, analog_t bpm)
   : tempo_(duration::from_bpm(bpm, sample_rate))
   , period_min_(sample_period_min)

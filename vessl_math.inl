@@ -30,6 +30,48 @@ VESSL_INLINE analog_t cos<analog_t, phase_t>(phase_t z)
 { 
   return cos<analog_t>(two_pi<analog_t>() * cast<analog_t>(z)); 
 }
+
+template <>
+VESSL_INLINE analog_t mod<analog_t>(analog_t v, analog_t *i)
+{
+  return ::modff(v, i);
+}
+
+template <typename T>
+VESSL_INLINE T abs(const T &val)
+{
+  return val < 0 ? -val : +val;
+}
+
+template<>
+VESSL_INLINE float abs<float>(const float &val)
+{
+  return fabsf(val);
+}
+
+template<>
+VESSL_INLINE double abs<double>(const double &val)
+{
+  return fabs(val);
+}
+
+template <typename T>
+VESSL_INLINE T epsilon()
+{
+  return T(0);
+}
+
+template<>
+VESSL_INLINE float epsilon<float>()
+{
+  return FLT_EPSILON;
+}
+
+template<>
+VESSL_INLINE double epsilon<double>()
+{
+  return DBL_EPSILON;
+}
   
 template<typename T, size_t N>
 VESSL_INLINE sample::frame<T, N> round(sample::frame<T, N> x)
@@ -207,12 +249,6 @@ struct lerper<T,phase_t>
   }
 };
 
-template <>
-VESSL_INLINE analog_t mod<analog_t>(analog_t v, analog_t *i)
-{
-  return ::modff(v, i);
-}
-
 template <typename T, typename D>
 VESSL_INLINE T lerp(T begin, T end, D t)
 {
@@ -249,6 +285,28 @@ VESSL_INLINE analog_t wrap01<analog_t>(analog_t v)
 
 namespace vessl
 {
+
+template <typename T>
+VESSL_INLINE transform33<T>::transform33(): matrix<T>(data_, 3, 3)
+{
+  set_identity();
+}
+
+template <typename T>
+transform33<T>::transform33(const transform33 &other): matrix<T>(data_, 3, 3)
+{
+  memcpy(data_, other.data_, sizeof(T)*3*3);
+}
+
+template <typename T>
+VESSL_INLINE void transform33<T>::set_identity()
+{
+  matrix<T>::clear();
+  for (size_t i = 0; i < 3; i++) {
+    matrix<T>::set(i,i, T(1LL));
+  }
+}
+
 template <typename T>
 VESSL_INLINE void transform33<T>::set_euler(phase_t pitch, phase_t yaw, phase_t roll)
 {
@@ -275,5 +333,31 @@ VESSL_INLINE void transform33<T>::set_euler(phase_t pitch, phase_t yaw, phase_t 
   m::set(2, 0, -sinb);
   m::set(2, 1, cosb * sinc);
   m::set(2, 2, cosb * cosc);
+}
+
+template <typename T>
+VESSL_INLINE void transform33<T>::set_euler_radians(analog_t pitch_radians, analog_t yaw_radians, analog_t roll_radians)
+{
+  return set_euler(cast<phase_t>(pitch_radians / math::two_pi<analog_t>()), 
+                   cast<phase_t>(yaw_radians / math::two_pi<analog_t>()), 
+                   cast<phase_t>(roll_radians / math::two_pi<analog_t>()));
+}
+
+template <typename T>
+VESSL_INLINE sample::frame<T, 3> transform33<T>::multiply(const sample::frame<T, 3> &input)
+{
+  using m = matrix<T>;
+  sample::frame<T,3> output;
+  T* out = output.samples;
+  const T* in = input.samples;
+
+  out[0] = m::get(0,0) * in[0] + m::get(0,1) * in[1] + m::get(0,2) * in[2];
+  out[1] = m::get(1,0) * in[0] + m::get(1,1) * in[1] + m::get(1,2) * in[2];
+  out[2] = m::get(2,0) * in[0] + m::get(2,1) * in[1] + m::get(2,2) * in[2];
+
+  // this might be faster?
+  //mtrx.multiply(input.toMatrix(), output.toMatrix());
+
+  return output;
 }
 }

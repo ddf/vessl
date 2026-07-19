@@ -24,12 +24,11 @@
 
 // ReSharper disable CppClangTidyPortabilityTemplateVirtualMemberFunction
 #pragma once
-#include <cassert>
-#include <cmath>
-#include <cstdint>
-#include <cstring>
-#include <climits>
-#include <utility>
+#include <assert.h>
+#include <math.h>
+#include <stdint.h>
+#include <string.h>
+#include <limits.h>
 
 // because some people like to redefine these math functions with macros
 #ifdef sqrt
@@ -58,13 +57,6 @@
 
 #ifdef round
 #undef round
-#endif
-
-// mainly to get Rider to shut up about not being able to find assert even though we include <cassert>
-#ifndef NDEBUG
-#ifndef assert
-static void assert(bool condition) { }
-#endif
 #endif
 
 #define VASSERT(cond, msg) assert((void(msg), cond))
@@ -102,6 +94,295 @@ static constexpr phase_t phase_zero = 0UL;
 template<typename T, typename F>
 VESSL_INLINE constexpr T cast(const F& from) { return static_cast<T>(from); }
 
+template<typename T>
+class source
+{
+public:
+  source() = default;
+  virtual ~source() = default;
+  source(const source&) = default;
+  source(source&&) = default;
+  source& operator=(const source&) = default;
+  source& operator=(source&&) = default;
+
+  [[nodiscard]] virtual binary_t is_empty() const = 0;
+  virtual T read() = 0;
+
+  VESSL_INLINE explicit operator bool() const { return !is_empty(); }
+};
+
+template<typename T>
+class sink
+{
+public:
+  sink() = default;
+  virtual ~sink() = default;
+  sink(const sink&) = default;
+  sink(sink&&) = default;
+  sink& operator=(const sink&) = default;
+  sink& operator=(sink&&) = default;
+
+  [[nodiscard]] virtual binary_t is_full() const = 0;
+  virtual void write(const T& value) = 0;
+
+  VESSL_INLINE sink& operator<<(const T& value) { write(value); return *this; }
+  VESSL_INLINE explicit operator binary_t() const { return !is_full(); }
+};
+
+// a readonly list of type T with support for range-based iteration.
+template<typename T>
+class list
+{
+public:
+  list() = default;
+  virtual ~list() = default;
+  list(const list&) = default;
+  list(list&&) = default;
+  list& operator=(const list&) = default;
+  list& operator=(list&&) = default;
+    
+  [[nodiscard]] virtual size_t size() const = 0;
+  VESSL_INLINE binary_t is_empty() const { return size() == 0; }
+  VESSL_INLINE T operator[](size_t index) const
+  {
+    VASSERT(index < size(), "Attempt to access a list element with out-of-bounds index."); 
+    return element_at(index);
+  }
+    
+  class iterator
+  {
+  public:
+    static iterator begin(const list& src) { return iterator(src, 0); }
+    static iterator end(const list& src) { return iterator(src, src.size()); }
+    T operator*() const { return (*src_)[index_]; }
+    iterator& operator++() { index_++; return *this; } 
+    bool operator==(const iterator& it) const { return src_ == it.src_ && index_ == it.index_; }
+    bool operator!=(const iterator& it) const { return !(*this == it); }
+      
+  private:
+    const list* src_ = nullptr;
+    size_t index_ = 0;
+    iterator(const list& source, size_t index): src_(&source), index_(index) {}
+  };
+    
+protected:
+  virtual T element_at(size_t index) const = 0;
+};
+  
+template<typename T>
+VESSL_INLINE typename list<T>::iterator begin(const list<T>& lst) { return list<T>::iterator::begin(lst); }
+  
+template<typename T>
+VESSL_INLINE typename list<T>::iterator end(const list<T>& lst) { return list<T>::iterator::end(lst); }
+
+template<typename T>
+class array // not a list<T> to keep size to 16 bytes, but can be converted to list<T> with as_list()
+{
+public:
+  VESSL_INLINE array() : data_(nullptr), size_(0) {}
+  VESSL_INLINE array(T* src_data, size_t src_size) : data_(src_data), size_(src_size) {}
+
+  VESSL_INLINE T* data() { return data_; }
+  VESSL_INLINE const T* data() const { return data_; }
+  VESSL_INLINE size_t size() const { return size_; }
+
+  // ranged-based for support
+  VESSL_INLINE T* begin() { return data_; }
+  VESSL_INLINE T* end() { return data_ + size_; }
+    
+  VESSL_INLINE T& operator[](size_t index) { return data_[index]; }
+  VESSL_INLINE const T& operator[](size_t index) const { return data_[index]; }
+
+  class reader final : public source<T>
+  {
+  public:
+    VESSL_INLINE explicit reader() 
+    : source<T>()
+    , begin_(nullptr), head_(nullptr), end_(nullptr) {}
+      
+    VESSL_INLINE reader(const T* data, size_t size) 
+    : source<T>()
+    , begin_(data), head_(data), end_(data + size) {}
+      
+    VESSL_INLINE explicit reader(array source) : reader(source.data_, source.size_) {}
+
+    // source methods
+    VESSL_INLINE binary_t is_empty() const override { return head_ == end_; }
+    VESSL_INLINE T read() override { return *head_++; }
+
+    VESSL_INLINE size_t available() const { return end_ - head_; }
+
+    VESSL_INLINE T peek() const { return *head_; }
+    VESSL_INLINE const T* operator*() const { return head_; }
+
+    VESSL_INLINE reader reset() { head_ = begin_; return *this; }
+      
+  protected:
+    const T* begin_;
+    const T* head_;
+    const T* end_;
+  };
+
+  class writer final : public sink<T>
+  {
+  public:
+    VESSL_INLINE explicit writer(array source) : sink<T>(), head_(source.data_), end_(source.data_ + source.size_) {}
+    VESSL_INLINE writer(T* data, size_t size) : sink<T>(), head_(data), end_(data + size) {}
+
+    VESSL_INLINE binary_t is_full() const override { return head_ == end_; }
+    VESSL_INLINE void write(const T& v) override { *head_++ = v; }
+    // block copy the entire contents of reader into this writer.
+    // writer must have enough space for the contents of reader.
+    // ReSharper disable once CppEnforceOverridingFunctionStyle
+    void write(const reader& r);
+    VESSL_INLINE size_t available() const { return end_ - head_; }
+      
+  protected:
+    T* head_;
+    const T* end_;
+  };
+
+  [[nodiscard]] VESSL_INLINE reader make_reader() const { return reader(*this); }
+  [[nodiscard]] VESSL_INLINE writer make_writer() { return writer(*this); }
+  [[nodiscard]] VESSL_INLINE list<T> as_list() const { return array_list(*this); }
+
+  // block copy this array to dest, which must be large enough to hold this array.
+  void copy_to(array dest) const;
+
+  void fill(T value);
+    
+  // adds value to every element in the array, returns dest
+  array offset(T value, array dest) const;
+  VESSL_INLINE array offset(T value) { return offset(value, *this); }
+    
+  // element-wise addition of this and other, returns dest
+  array add(array other, array dest) const;
+  VESSL_INLINE array add(array other) { return add(other, *this); }
+    
+  // element-wise subtraction of this and other, returns dest
+  array subtract(array other, array dest) const;
+  VESSL_INLINE array subtract(array other) { return subtract(other, *this); }
+    
+  // scales every element in this array by value, returns dest
+  array scale(T value, array dest) const;
+  VESSL_INLINE array scale(T value) { return scale(value, *this); }
+    
+  // element-wise multiplication of this and other, returns dest
+  array multiply(array other, array dest) const;
+  VESSL_INLINE array multiply(array other) { return multiply(other, *this); }
+    
+protected:
+  class array_list final : public list<T>
+  {
+  public:
+    explicit array_list(const array& array) : data_(array.data_), size_(array.size_) {}
+    ~array_list() override = default;
+    [[nodiscard]] size_t size() const override { return size_; }
+
+  protected:
+    VESSL_INLINE T element_at(size_t index) const override
+    {
+      return data_[index];
+    }
+    
+  private:
+    const T* data_;
+    size_t size_;
+  };
+  
+  T* data_;
+  size_t size_;
+};
+
+template<typename T>
+VESSL_INLINE T* begin(array<T>& arr) { return arr.begin(); }
+
+template<typename T>
+VESSL_INLINE T* end(array<T>& arr) { return arr.end(); }
+
+// matrix_data is a separate struct so that we can specialize for ARM easily
+template<typename T>
+struct matrix_data
+{
+  T*       data;
+  uint32_t num_rows;
+  uint32_t num_cols;
+    
+  VESSL_INLINE matrix_data() : data(nullptr), num_rows(0), num_cols(0) {}
+  VESSL_INLINE matrix_data(T* d, uint32_t r, uint32_t c) : data(d), num_rows(r), num_cols(c) {}
+    
+  [[nodiscard]] VESSL_INLINE T* operator*() { return data; }
+  [[nodiscard]] VESSL_INLINE T* operator*() const { return data; }
+  [[nodiscard]] VESSL_INLINE uint32_t rows() const { return num_rows; }
+  [[nodiscard]] VESSL_INLINE uint32_t cols() const { return num_cols; }
+};
+  
+template<typename T>
+class matrix
+{
+public:
+  VESSL_INLINE matrix() = default;
+  VESSL_INLINE matrix(T* src_data, size_t rows, size_t cols) : data_(src_data, rows, cols) {}
+
+  VESSL_INLINE T* data() { return *data_; }
+  VESSL_INLINE const T* data() const { return *data_; }
+  [[nodiscard]] VESSL_INLINE size_t rows() const { return data_.rows(); }
+  [[nodiscard]] VESSL_INLINE size_t columns() const { return data_.cols(); }
+  [[nodiscard]] VESSL_INLINE size_t size() const { return rows()*columns(); }
+    
+  VESSL_INLINE T* operator[](uint32_t row) { return &data()[row*columns()]; }
+  VESSL_INLINE const T* operator[](uint32_t row) const { return &data()[row*columns()]; }
+    
+  VESSL_INLINE void clear();
+  VESSL_INLINE T get(size_t row, size_t col) const { return data()[row*columns() + col]; }
+  VESSL_INLINE void set(size_t row, size_t col, T value) { data()[row*columns() + col] = value; }
+    
+  // element-wise addition of this and other, returns dest
+  matrix add(matrix other, matrix dest) const;
+  VESSL_INLINE matrix add(matrix other) { return add(other, *this); }
+    
+  // element-wise subtraction of this and other, returns dest
+  matrix subtract(matrix other, matrix dest) const;
+  VESSL_INLINE matrix subtract(matrix other) { return subtract(other, *this); }
+    
+  // scales every element in this matrix by value, returns dest
+  matrix scale(T value, matrix dest) const;
+  VESSL_INLINE matrix scale(T value) { return scale(value, *this); }
+    
+  // matrix multiplication of this and other, returns dest
+  matrix multiply(matrix other, matrix dest) const;
+  VESSL_INLINE matrix multiply(matrix other) { return multiply(other, *this); }
+    
+  // matrix vector multiplication of this and vector, returns dest
+  array<T> multiply(const array<T>& vector, array<T> dest) const;
+    
+private:
+  matrix_data<T> data_;
+};
+
+namespace sample
+{
+template<typename T, size_t N>
+struct frame;
+}
+
+// not even sure this belongs in here
+template<typename T>
+class transform33 : public matrix<T>
+{
+public:
+  transform33();
+  transform33(const transform33& other);
+
+  void set_identity();
+  void set_euler(phase_t pitch, phase_t yaw, phase_t roll);
+  void set_euler_radians(analog_t pitch_radians, analog_t yaw_radians, analog_t roll_radians);
+  [[nodiscard]] sample::frame<T,3> multiply(const sample::frame<T,3>& input);
+
+private:
+  T data_[3 * 3];
+};
+
 namespace math
 {
 template<typename T>
@@ -120,13 +401,13 @@ template<>
 VESSL_INLINE constexpr phase_t two_pi() { return phase_360; }
 
 template<typename T>
-VESSL_INLINE T abs(const T& val) { return ::abs(val); }
+T abs(const T& val);
       
 template<typename T>
 VESSL_INLINE T constrain(T val, T low, T high) { return val < low ? low : val > high ? high : val; }
       
 template<typename T>
-VESSL_INLINE T epsilon() { return std::numeric_limits<T>::epsilon(); }
+T epsilon();
 
 template<typename T>
 VESSL_INLINE T exp(T v) { return ::exp(v); }
@@ -312,150 +593,6 @@ private:
   analog_t x_, y_;
 };
 } // namespace noise
-
-template<typename T>
-class source
-{
-public:
-  source() = default;
-  virtual ~source() = default;
-  source(const source&) = default;
-  source(source&&) = default;
-  source& operator=(const source&) = default;
-  source& operator=(source&&) = default;
-
-  [[nodiscard]] virtual binary_t is_empty() const = 0;
-  virtual T read() = 0;
-
-  VESSL_INLINE explicit operator bool() const { return !is_empty(); }
-};
-
-template<typename T>
-class sink
-{
-public:
-  sink() = default;
-  virtual ~sink() = default;
-  sink(const sink&) = default;
-  sink(sink&&) = default;
-  sink& operator=(const sink&) = default;
-  sink& operator=(sink&&) = default;
-
-  [[nodiscard]] virtual binary_t is_full() const = 0;
-  virtual void write(const T& value) = 0;
-
-  VESSL_INLINE sink& operator<<(const T& value) { write(value); return *this; }
-  VESSL_INLINE explicit operator binary_t() const { return !is_full(); }
-};
-
-template<typename T>
-class array // not a list<T> to keep size to 16 bytes
-{
-public:
-  VESSL_INLINE array() : data_(nullptr), size_(0) {}
-  VESSL_INLINE array(T* src_data, size_t src_size) : data_(src_data), size_(src_size) {}
-
-  VESSL_INLINE T* data() { return data_; }
-  VESSL_INLINE const T* data() const { return data_; }
-  VESSL_INLINE size_t size() const { return size_; }
-
-  // ranged-based for support
-  VESSL_INLINE T* begin() { return data_; }
-  VESSL_INLINE T* end() { return data_ + size_; }
-    
-  VESSL_INLINE T& operator[](size_t index) { return data_[index]; }
-  VESSL_INLINE const T& operator[](size_t index) const { return data_[index]; }
-
-  class reader final : public source<T>
-  {
-  public:
-    VESSL_INLINE explicit reader() 
-    : source<T>()
-    , begin_(nullptr), head_(nullptr), end_(nullptr) {}
-      
-    VESSL_INLINE reader(const T* data, size_t size) 
-    : source<T>()
-    , begin_(data), head_(data), end_(data + size) {}
-      
-    VESSL_INLINE explicit reader(array source) : reader(source.data_, source.size_) {}
-
-    // source methods
-    VESSL_INLINE binary_t is_empty() const override { return head_ == end_; }
-    VESSL_INLINE T read() override { return *head_++; }
-
-    VESSL_INLINE size_t available() const { return end_ - head_; }
-
-    VESSL_INLINE T peek() const { return *head_; }
-    VESSL_INLINE const T* operator*() const { return head_; }
-
-    VESSL_INLINE reader reset() { head_ = begin_; return *this; }
-      
-  protected:
-    const T* begin_;
-    const T* head_;
-    const T* end_;
-  };
-
-  class writer final : public sink<T>
-  {
-  public:
-    VESSL_INLINE explicit writer(array source) : sink<T>(), head_(source.data_), end_(source.data_ + source.size_) {}
-    VESSL_INLINE writer(T* data, size_t size) : sink<T>(), head_(data), end_(data + size) {}
-
-    VESSL_INLINE binary_t is_full() const override { return head_ == end_; }
-    VESSL_INLINE void write(const T& v) override { *head_++ = v; }
-    // block copy the entire contents of reader into this writer.
-    // writer must have enough space for the contents of reader.
-    // ReSharper disable once CppEnforceOverridingFunctionStyle
-    void write(const reader& r);
-    VESSL_INLINE size_t available() const { return end_ - head_; }
-      
-  protected:
-    T* head_;
-    const T* end_;
-  };
-
-  [[nodiscard]] VESSL_INLINE reader make_reader() const { return reader(*this); }
-  [[nodiscard]] VESSL_INLINE writer make_writer() { return writer(*this); }
-
-  // block copy this array to dest, which must be large enough to hold this array.
-  void copy_to(array dest) const;
-
-  void fill(T value);
-    
-  // adds value to every element in the array, returns dest
-  array offset(T value, array dest) const;
-  VESSL_INLINE array offset(T value) { return offset(value, *this); }
-    
-  // element-wise addition of this and other, returns dest
-  array add(array other, array dest) const;
-  VESSL_INLINE array add(array other) { return add(other, *this); }
-    
-  // element-wise subtraction of this and other, returns dest
-  array subtract(array other, array dest) const;
-  VESSL_INLINE array subtract(array other) { return subtract(other, *this); }
-    
-  // scales every element in this array by value, returns dest
-  array scale(T value, array dest) const;
-  VESSL_INLINE array scale(T value) { return scale(value, *this); }
-    
-  // element-wise multiplication of this and other, returns dest
-  array multiply(array other, array dest) const;
-  VESSL_INLINE array multiply(array other) { return multiply(other, *this); }
-    
-protected:
-  T* data_;
-  size_t size_;
-};
-
-template<typename T>
-VESSL_INLINE T* begin(array<T>& arr) { return arr.begin(); }
-
-template<typename T>
-VESSL_INLINE T* end(array<T>& arr) { return arr.end(); }
-
-template<typename T>
-class matrix;
 
 namespace sample
 {
@@ -887,165 +1024,6 @@ struct biquad
   struct high_shelf final : flt<T, hscg> {};
 };
 } // namespace filtering
-  
-
-// matrix_data is a separate struct so that we can specialize for ARM easily
-template<typename T>
-struct matrix_data
-{
-  T*       data;
-  uint32_t num_rows;
-  uint32_t num_cols;
-    
-  VESSL_INLINE matrix_data() : data(nullptr), num_rows(0), num_cols(0) {}
-  VESSL_INLINE matrix_data(T* d, uint32_t r, uint32_t c) : data(d), num_rows(r), num_cols(c) {}
-    
-  [[nodiscard]] VESSL_INLINE T* operator*() { return data; }
-  [[nodiscard]] VESSL_INLINE T* operator*() const { return data; }
-  [[nodiscard]] VESSL_INLINE uint32_t rows() const { return num_rows; }
-  [[nodiscard]] VESSL_INLINE uint32_t cols() const { return num_cols; }
-};
-  
-template<typename T>
-class matrix
-{
-public:
-  VESSL_INLINE matrix() = default;
-  VESSL_INLINE matrix(T* src_data, size_t rows, size_t cols) : data_(src_data, rows, cols) {}
-
-  VESSL_INLINE T* data() { return *data_; }
-  VESSL_INLINE const T* data() const { return *data_; }
-  [[nodiscard]] VESSL_INLINE size_t rows() const { return data_.rows(); }
-  [[nodiscard]] VESSL_INLINE size_t columns() const { return data_.cols(); }
-  [[nodiscard]] VESSL_INLINE size_t size() const { return rows()*columns(); }
-    
-  VESSL_INLINE T* operator[](uint32_t row) { return &data()[row*columns()]; }
-  VESSL_INLINE const T* operator[](uint32_t row) const { return &data()[row*columns()]; }
-    
-  VESSL_INLINE void clear();
-  VESSL_INLINE T get(size_t row, size_t col) const { return data()[row*columns() + col]; }
-  VESSL_INLINE void set(size_t row, size_t col, T value) { data()[row*columns() + col] = value; }
-    
-  // element-wise addition of this and other, returns dest
-  matrix add(matrix other, matrix dest) const;
-  VESSL_INLINE matrix add(matrix other) { return add(other, *this); }
-    
-  // element-wise subtraction of this and other, returns dest
-  matrix subtract(matrix other, matrix dest) const;
-  VESSL_INLINE matrix subtract(matrix other) { return subtract(other, *this); }
-    
-  // scales every element in this matrix by value, returns dest
-  matrix scale(T value, matrix dest) const;
-  VESSL_INLINE matrix scale(T value) { return scale(value, *this); }
-    
-  // matrix multiplication of this and other, returns dest
-  matrix multiply(matrix other, matrix dest) const;
-  VESSL_INLINE matrix multiply(matrix other) { return multiply(other, *this); }
-    
-  // matrix vector multiplication of this and vector, returns dest
-  array<T> multiply(const array<T>& vector, array<T> dest) const;
-    
-private:
-  matrix_data<T> data_;
-};
-
-// not even sure this belongs in here
-template<typename T>
-class transform33 : public matrix<T>
-{
-public:
-  transform33() : matrix<T>(data_, 3, 3)
-  {
-    set_identity();
-  }
-
-  transform33(const transform33& other) : matrix<T>(data_, 3, 3)
-  {
-    memcpy(data_, other.data_, sizeof(T)*3*3);
-  }
-    
-  VESSL_INLINE void set_identity() 
-  {
-    matrix<T>::clear();
-    for (size_t i = 0; i < 3; i++) {
-      matrix<T>::set(i,i, T(1LL));
-    }
-  }
-      
-  void set_euler(phase_t pitch, phase_t yaw, phase_t roll);
-
-  VESSL_INLINE void set_euler_radians(analog_t pitch_radians, analog_t yaw_radians, analog_t roll_radians)
-  {
-    return set_euler(cast<phase_t>(pitch_radians / math::two_pi<analog_t>()), 
-      cast<phase_t>(yaw_radians / math::two_pi<analog_t>()), 
-      cast<phase_t>(roll_radians / math::two_pi<analog_t>()));
-  }
-      
-  [[nodiscard]] VESSL_INLINE sample::frame<T,3> multiply(const sample::frame<T,3>& input)
-  {
-    using m = matrix<T>;
-    sample::frame<T,3> output;
-    T* out = output.samples;
-    const T* in = input.samples;
-
-    out[0] = m::get(0,0) * in[0] + m::get(0,1) * in[1] + m::get(0,2) * in[2];
-    out[1] = m::get(1,0) * in[0] + m::get(1,1) * in[1] + m::get(1,2) * in[2];
-    out[2] = m::get(2,0) * in[0] + m::get(2,1) * in[1] + m::get(2,2) * in[2];
-
-    // this might be faster?
-    //mtrx.multiply(input.toMatrix(), output.toMatrix());
-
-    return output;
-  }
-      
-private:
-  T data_[3 * 3];
-};
-  
-template<typename T>
-class list
-{
-public:
-  list() = default;
-  virtual ~list() = default;
-  list(const list&) = default;
-  list(list&&) = default;
-  list& operator=(const list&) = default;
-  list& operator=(list&&) = default;
-    
-  [[nodiscard]] virtual size_t size() const = 0;
-  VESSL_INLINE binary_t is_empty() const { return size() == 0; }
-  VESSL_INLINE T operator[](size_t index) const
-  {
-    VASSERT(index < size(), "Attempt to access a list element with out-of-bounds index."); 
-    return element_at(index);
-  }
-    
-  class iterator
-  {
-  public:
-    static iterator begin(const list& src) { return iterator(src, 0); }
-    static iterator end(const list& src) { return iterator(src, src.size()); }
-    T operator*() const { return (*src_)[index_]; }
-    iterator& operator++() { index_++; return *this; } 
-    bool operator==(const iterator& it) const { return src_ == it.src_ && index_ == it.index_; }
-    bool operator!=(const iterator& it) const { return !(*this == it); }
-      
-  private:
-    const list* src_ = nullptr;
-    size_t index_ = 0;
-    iterator(const list& source, size_t index): src_(&source), index_(index) {}
-  };
-    
-protected:
-  virtual T element_at(size_t index) const = 0;
-};
-  
-template<typename T>
-VESSL_INLINE typename list<T>::iterator begin(const list<T>& lst) { return list<T>::iterator::begin(lst); }
-  
-template<typename T>
-VESSL_INLINE typename list<T>::iterator end(const list<T>& lst) { return list<T>::iterator::end(lst); }
 
 namespace time
 {
@@ -1073,7 +1051,7 @@ struct duration
   
   duration() : samples(0) {}
   explicit duration(analog_t a) : samples(a) {}
-  explicit operator binary_t() const { return math::abs(samples) >= math::epsilon<analog_t>(); }
+  explicit operator binary_t() const;
   explicit operator digital_t() const { return static_cast<digital_t>(samples); }
   explicit operator analog_t() const { return samples;}
   explicit operator phase_t() const { return static_cast<phase_t>(samples); }

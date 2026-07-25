@@ -486,14 +486,14 @@ VESSL_INLINE T vessl::sample::waves::bipolar::triangle<T>::evaluate(phase_t phas
 }
 
 template <typename T>
-T vessl::sample::waves::unipolar::sine<T>::evaluate(phase_t phase) const
+VESSL_INLINE T vessl::sample::waves::unipolar::sine<T>::evaluate(phase_t phase) const
 {
   static constexpr T half = cast<T>(0.5f);
   return math::sin<T>(phase)*half + half;
 }
 
 template <typename T>
-vessl::sample::waves::unipolar::triangle<T>::triangle()
+VESSL_INLINE vessl::sample::waves::unipolar::triangle<T>::triangle()
   : attack_len_(phase_180)
   , attack_mult_(1.0f / cast<analog_t>(attack_len_))
   , decay_mult_(attack_mult_)
@@ -504,17 +504,84 @@ template <typename T>
 VESSL_INLINE T vessl::sample::waves::unipolar::triangle<T>::evaluate(phase_t phase) const
 {
   analog_t p = cast<analog_t>(phase);
-  return phase < attack_len_ ? T(p*attack_mult_) : T((1.f - p)*decay_mult_);
+  return phase < attack_len_ ? cast<T>(p*attack_mult_) : cast<T>((1.f - p)*decay_mult_);
 }
 
 template <typename T>
-void vessl::sample::waves::unipolar::triangle<T>::set_pulse_width(phase_t pw)
+VESSL_INLINE void vessl::sample::waves::unipolar::triangle<T>::set_pulse_width(phase_t pw)
 {
   static constexpr phase_t pwlo = cast<phase_t>(0.01f);
   static constexpr phase_t pwhi = cast<phase_t>(0.99f);
   attack_len_ = math::constrain(pw, pwlo, pwhi);
   attack_mult_ = 1.f / cast<analog_t>(attack_len_);
   decay_mult_ = 1.f /  cast<analog_t>(phase_360 - attack_len_);
+}
+
+template <typename T>
+VESSL_INLINE T vessl::sample::windows::rectangular<T>::evaluate(phase_t phase) const
+{
+  return cast<T>(1.f);
+}
+
+template <typename T>
+VESSL_INLINE T vessl::sample::windows::triangle<T>::evaluate(phase_t phase) const
+{
+  analog_t p = cast<analog_t>(phase);
+  return p < 0.5f ? cast<T>(p*2.f) : cast<T>(1.f - (p - 0.5f)*2.f);
+}
+
+template <typename T>
+VESSL_INLINE T vessl::sample::windows::hamming<T>::evaluate(phase_t phase) const
+{
+  return cast<T>(0.54f - 0.45f*math::cos<analog_t>(phase));
+}
+
+template <typename T>
+VESSL_INLINE T vessl::sample::windows::hann<T>::evaluate(phase_t phase) const
+{
+  return cast<T>(0.5f * (1.f - math::cos<analog_t>(phase)));
+}
+
+template <typename T>
+VESSL_INLINE void vessl::sample::windows::render(type window_type, array<T> output)
+{
+  switch (window_type)
+  {
+  case type::rectangular:
+    sample::render(rectangular<T>(), output);
+    break;
+  case type::triangle:
+    sample::render(triangle<T>(), output);
+    break;
+  case type::hamming:
+    sample::render(hamming<T>(), output);
+    break;
+  case type::hann:
+    sample::render(hann<T>(), output);
+    break;
+  default:
+    VASSERT(false, "Invalid window type");
+    break;
+  }
+}
+
+template <typename T>
+VESSL_INLINE void vessl::sample::waveform<T>::render(array<T> output) const
+{
+  phase_t phase = 0;
+  phase_t step = phase_360 / output.size();
+  auto w = output.make_writer();
+  while (w)
+  {
+    w.write(evaluate(phase));
+    phase += step;
+  }
+}
+
+template <typename T>
+VESSL_INLINE void vessl::sample::render(const waveform<T>& waveform, array<T> output)
+{
+  waveform.render(output);
 }
 
 template <typename I, typename T>
@@ -696,6 +763,12 @@ VESSL_INLINE ring_buffer<T> ring_buffer<T>::operator<<(typename array<T>::reader
     write(r.read());
   }
   return *this;
+}
+
+template <typename T>
+VESSL_INLINE T ring_buffer<T>::overdub(const T &v)
+{
+  return write(data_[write_index_] + v);
 }
 
 template <typename T>

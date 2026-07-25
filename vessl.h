@@ -687,7 +687,13 @@ struct waveform
   waveform& operator=(waveform&&) = default;
 
   virtual sample_t evaluate(phase_t phase) const = 0;  // NOLINT(portability-template-virtual-member-function)
+  
+  // renders one cycle of this waveform to the output array
+  void render(array<T> output) const;
 };
+
+template<typename T>
+void render(const waveform<T>& waveform, array<T> output);
   
 namespace waves
 {
@@ -755,7 +761,46 @@ struct square final : waveform<T>
 };
 } // namespace unipolar
 } // namespace waves
-  
+
+namespace windows
+{
+template<typename T>
+struct rectangular final : waveform<T>
+{
+  T evaluate(phase_t phase) const override;
+};
+
+template<typename T>
+struct triangle final : waveform<T>
+{
+  T evaluate(phase_t phase) const override;
+};
+
+template<typename T>
+struct hamming final : waveform<T>
+{
+  T evaluate(phase_t phase) const override;
+};
+
+template<typename T>
+struct hann final : waveform<T>
+{
+  T evaluate(phase_t phase) const override;
+};
+
+enum class type : uint8_t
+{
+  rectangular,
+  triangle,
+  hamming,
+  hann
+};
+
+template<typename T>
+void render(type window_type, array<T> output);
+
+}
+
 namespace interpolation
 {
 struct nearest
@@ -855,6 +900,10 @@ public:
   void set_write_index(size_t index);
 
   ring_buffer operator<<(typename array<T>::reader r);
+  
+  // add v to the buffer contents at the current write_index and advance the write_index.
+  // returns the value that was overwritten.
+  T overdub(const T& v);
   
   // add v to the buffer contents write_offset in front of the write head.
   // return the value that results.
@@ -1024,6 +1073,45 @@ struct biquad
   struct high_shelf final : flt<T, hscg> {};
 };
 } // namespace filtering
+
+#ifdef complex
+#undef complex
+#endif
+
+namespace transform 
+{
+  template<typename T>
+  struct complex : private sample::frame<T,2>
+  {
+    complex() : sample::frame<T,2>() {}
+    explicit complex(T real) : sample::frame<T,2>(real, 0) {}
+    complex(T real, T imag) : sample::frame<T,2>(real, imag) {}
+    
+    void scale(T scalar);
+    void set_polar(T magnitude, phase_t angle);
+    
+  private:
+    using sample::frame<T,2>::samples;
+  };
+
+  // note: currently only implemented for float32_t on ARM
+  template<typename T>
+  class fft final
+  {
+  public:
+    using sample_t = T;
+    using complex_t = complex<T>;
+    
+    fft();
+    explicit fft(size_t size);
+    
+    void initialize(size_t size);
+    void size() const;
+    
+    void forward(array<sample_t> input, array<complex_t> output);
+    void inverse(array<complex_t> input, array<sample_t> output);
+  };
+} // namespace transform
 
 namespace time
 {
@@ -1407,6 +1495,7 @@ protected:
 #include "vessl_noise.inl"
 #include "vessl_sample.inl"
 #include "vessl_filtering.inl"
+#include "vessl_transform.inl"
 #include "vessl_time.inl"
 #include "vessl_parameter.inl"
 

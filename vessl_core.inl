@@ -19,8 +19,8 @@ VESSL_INLINE constexpr phase_t cast<phase_t, digital_t>(const digital_t& from)
 template<>
 VESSL_INLINE constexpr analog_t cast<analog_t, phase_t>(const phase_t& from)
 {
-  constexpr analog_t phase_to_analog = 1.0f / 4294967295.0f;
-  return static_cast<analog_t>(from) * phase_to_analog;
+  constexpr double phase_to_analog = 1.0f / 4294967295.0;
+  return static_cast<analog_t>(static_cast<double>(from) * phase_to_analog);
 }
 
 template<>

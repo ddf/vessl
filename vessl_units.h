@@ -1,6 +1,7 @@
 #pragma once
 
 #include "vessl.h"
+#include <algorithm> // for swap
 
 namespace vessl
 {
@@ -383,6 +384,58 @@ private:
   phase_t dt_;
   phase_t phase_;
   sample::waves::unipolar::square<T> pulse_;
+};
+
+// synthesize audio from a frequency-domain spectrum.
+// SpectrumSize is the size of the FFT to use.
+// This will determine the length of the blocks of time-domain signal
+// that are overlapped to produce this generator's output.
+// The number of frequency bands available will be SpectrumSize/2 - 1.
+template<typename T, size_t SpectrumSize, size_t Overlap = 2>
+class spectral : public unit_generator<T>, plist<0>
+{
+public:
+  using fft_t = transform::fft<T>;
+  using sample_t = T;
+  using complex_t = transform::complex<T>;
+  
+  struct frequency_band
+  {
+    T magnitude = 0;
+    phase_t phase = 0;
+  };
+  
+  // data.frequencies must have length equal to SpectrumSize/2
+  // data.spectrum must have a length equal to SpectrumSize/2
+  // data.signal must have a length equal to SpectrumSize
+  // data.window must have a length equal to SpectrumSize
+  // data.buffer must have a length greater than or equal to SpectrumSize/2
+  struct data
+  {
+    array<frequency_band> frequencies;
+    array<complex_t> spectrum;
+    array<sample_t> signal;
+    array<sample_t> window;
+    sample::ring_buffer<sample_t> buffer;
+  };
+  
+  spectral(data& data, analog_t sample_rate);
+  
+  [[nodiscard]] const parameter_list & parameters() const override { return *this; }
+  [[nodiscard]] VESSL_INLINE frequency_band& get_band(size_t index) { return frequencies_[index]; }
+  sample_t generate() override;
+
+protected:
+  fft_t fft_;
+  array<frequency_band> frequencies_;
+  array<complex_t> spectrum_;
+  array<sample_t> signal_;
+  array<sample_t> window_;
+  sample::ring_buffer<sample_t> buffer_;
+  size_t read_idx_;
+  size_t gen_idx_;
+  size_t gen_inc_;
+  phase_t phase_shift_;
 };
 
 } // namespace generators

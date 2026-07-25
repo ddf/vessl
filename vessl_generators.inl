@@ -1,5 +1,7 @@
 #pragma once
 
+#include "vessl_units.h"
+
 namespace vessl
 {
 namespace generators
@@ -185,6 +187,66 @@ template <typename T>
 VESSL_INLINE parameter clock<T>::element_at(size_t index) const
 {
   return tempo();
+}
+
+template <typename T, size_t SpectrumSize, size_t Overlap>
+spectral<T, SpectrumSize, Overlap>::spectral(data &data, analog_t sample_rate)
+  : unit_generator<T>()
+  , fft_(SpectrumSize)
+  , frequencies_(data.frequencies.data(), data.frequencies.size())
+  , spectrum_(data.spectrum.data(), data.spectrum.size())
+  , signal_(data.signal.data(), data.signal.size())
+  , window_(data.window.data(), data.window.size())
+  , buffer_(data.buffer.data(), data.buffer.size())
+  , read_idx_(0)
+  , gen_idx_(0)
+  , gen_inc_(SpectrumSize/Overlap)
+  , phase_shift_(0)
+{
+  constexpr size_t bands = SpectrumSize/2;
+  VASSERT(data.spectrum.frequencies.size() == bands, "Invalid frequency bands size");
+  VASSERT(data.spectrum.size() >= bands, "Invalid spectrum size");
+  VASSERT(data.window.size() == SpectrumSize, "Invalid window size");
+  VASSERT(data.signal.size() == SpectrumSize, "Invalid signal size");
+  VASSERT(data.buffer.size() >= bands, "Invalid buffer size");
+  spectrum_[0] = { 0, 0 };
+  for (int i = 0; i < bands; ++i)
+  {
+    frequencies_[i].magnitude = 0;
+    frequencies_[i].phase = math::random::u32();
+  }
+}
+
+template <typename T, size_t SpectrumSize, size_t Overlap>
+VESSL_INLINE typename spectral<T, SpectrumSize, Overlap>::sample_t spectral<T, SpectrumSize, Overlap>::generate()
+{
+  if (gen_idx_ == read_idx_)
+  {
+    frequency_band* bands = frequencies_.data();
+    spectrum_.fill(complex_t(0.));
+    complex_t* spectrum = spectrum_.data();
+    for (int i = 0; i < SpectrumSize/2 - 1; ++i)
+    {
+      size_t si = i+1;
+      phase_t ps = 0; // phase_shift_*(si%2);
+      spectrum[si].set_polar(bands[i].magnitude, bands[i].phase + ps);
+    }
+    fft_.inverse(spectrum_, signal_);
+    //data_.signal.multiply(data_.window);
+    for (int i = 0; i < SpectrumSize; ++i)
+    {
+      buffer_.overdub(signal_[i]*window_[i]);
+      //data_.buffer.write(r.read());
+    }
+    size_t widx = buffer_.get_write_index();
+    gen_idx_ = widx > gen_inc_ ? widx - gen_idx_ - 1 : buffer_.size() - 1 - (gen_inc_ - widx);
+    phase_shift_ = (phase_shift_ == 0 ? phase_180 : 0);
+  }
+
+  sample_t sample = buffer_.data()[read_idx_];
+  buffer_.data()[read_idx_] = 0.f;
+  read_idx_ = (read_idx_ + 1) % buffer_.size();
+  return sample;
 }
 } // namespace generators
 } // namespace vessl

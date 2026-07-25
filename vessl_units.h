@@ -391,7 +391,7 @@ private:
 // This will determine the length of the blocks of time-domain signal
 // that are overlapped to produce this generator's output.
 // The number of frequency bands available will be SpectrumSize/2 - 1.
-template<typename T, size_t SpectrumSize, size_t Overlap = 2>
+template<typename T, size_t SpectrumSize>
 class spectral : public unit_generator<T>, plist<0>
 {
 public:
@@ -401,22 +401,20 @@ public:
   
   struct frequency_band
   {
-    T magnitude = 0;
     phase_t phase = 0;
+    T magnitude = 0;
   };
   
   // data.frequencies must have length equal to SpectrumSize/2
   // data.spectrum must have a length equal to SpectrumSize/2
-  // data.signal must have a length equal to SpectrumSize
+  // data.signal must have a length equal to SpectrumSize*2
   // data.window must have a length equal to SpectrumSize
-  // data.buffer must have a length greater than or equal to SpectrumSize/2
   struct data
   {
     array<frequency_band> frequencies;
     array<complex_t> spectrum;
     array<sample_t> signal;
     array<sample_t> window;
-    sample::ring_buffer<sample_t> buffer;
   };
   
   spectral(data& data, analog_t sample_rate);
@@ -424,18 +422,22 @@ public:
   [[nodiscard]] const parameter_list & parameters() const override { return *this; }
   [[nodiscard]] VESSL_INLINE frequency_band& get_band(size_t index) { return frequencies_[index]; }
   sample_t generate() override;
+  
+  size_t get_read_head(size_t idx) const;
 
 protected:
+  // set contents of spectrum_ based on contents of frequencies_
+  template<bool ShiftOddPhases>
+  void fill_spectrum();
+  
   fft_t fft_;
   array<frequency_band> frequencies_;
   array<complex_t> spectrum_;
-  array<sample_t> signal_;
+  array<sample_t> signal_a_;
+  array<sample_t> signal_b_;
   array<sample_t> window_;
-  sample::ring_buffer<sample_t> buffer_;
-  size_t read_idx_;
-  size_t gen_idx_;
-  size_t gen_inc_;
-  phase_t phase_shift_;
+  size_t read_idx_a_;
+  size_t read_idx_b_;
 };
 
 } // namespace generators

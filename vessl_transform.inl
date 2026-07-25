@@ -10,6 +10,13 @@ void transform::complex<T>::scale(T scalar)
 }
 
 template <typename T>
+VESSL_INLINE void transform::complex<T>::set_complex(T real, T imag)
+{
+  samples[0] = real;
+  samples[1] = imag;
+}
+
+template <typename T>
 VESSL_INLINE void transform::complex<T>::set_polar(T magnitude, phase_t angle)
 {
   samples[0] = magnitude * math::cos<T>(angle);

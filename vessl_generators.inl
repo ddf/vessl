@@ -189,64 +189,91 @@ VESSL_INLINE parameter clock<T>::element_at(size_t index) const
   return tempo();
 }
 
-template <typename T, size_t SpectrumSize, size_t Overlap>
-spectral<T, SpectrumSize, Overlap>::spectral(data &data, analog_t sample_rate)
+template <typename T, size_t SpectrumSize>
+spectral<T, SpectrumSize>::spectral(data &data, analog_t sample_rate)
   : unit_generator<T>()
   , fft_(SpectrumSize)
   , frequencies_(data.frequencies.data(), data.frequencies.size())
   , spectrum_(data.spectrum.data(), data.spectrum.size())
-  , signal_(data.signal.data(), data.signal.size())
+  , signal_a_(data.signal.data(), SpectrumSize)
+  , signal_b_(data.signal.data() + SpectrumSize, SpectrumSize)
   , window_(data.window.data(), data.window.size())
-  , buffer_(data.buffer.data(), data.buffer.size())
-  , read_idx_(0)
-  , gen_idx_(0)
-  , gen_inc_(SpectrumSize/Overlap)
-  , phase_shift_(0)
+  , read_idx_a_(SpectrumSize)
+  , read_idx_b_(SpectrumSize/2)
 {
   constexpr size_t bands = SpectrumSize/2;
-  VASSERT(data.spectrum.frequencies.size() == bands, "Invalid frequency bands size");
-  VASSERT(data.spectrum.size() >= bands, "Invalid spectrum size");
+  VASSERT(data.frequencies.size() == bands, "Invalid frequency bands size");
+  VASSERT(data.spectrum.size() == bands, "Invalid spectrum size");
   VASSERT(data.window.size() == SpectrumSize, "Invalid window size");
-  VASSERT(data.signal.size() == SpectrumSize, "Invalid signal size");
-  VASSERT(data.buffer.size() >= bands, "Invalid buffer size");
-  spectrum_[0] = { 0, 0 };
+  VASSERT(data.signal.size() == SpectrumSize*Overlap, "Invalid signal size");
+
   for (int i = 0; i < bands; ++i)
   {
-    frequencies_[i].magnitude = 0;
-    frequencies_[i].phase = math::random::u32();
+    frequency_band& band = frequencies_[i];
+    band.magnitude = 0;
+    band.phase = math::random::u32();
   }
+  signal_a_.fill(0);
+  signal_b_.fill(0);
 }
 
-template <typename T, size_t SpectrumSize, size_t Overlap>
-VESSL_INLINE typename spectral<T, SpectrumSize, Overlap>::sample_t spectral<T, SpectrumSize, Overlap>::generate()
+template <typename T, size_t SpectrumSize>
+VESSL_INLINE typename spectral<T, SpectrumSize>::sample_t spectral<T, SpectrumSize>::generate()
 {
-  if (gen_idx_ == read_idx_)
+  if (read_idx_a_ == SpectrumSize)
   {
-    frequency_band* bands = frequencies_.data();
-    spectrum_.fill(complex_t(0.));
-    complex_t* spectrum = spectrum_.data();
-    for (int i = 0; i < SpectrumSize/2 - 1; ++i)
-    {
-      size_t si = i+1;
-      phase_t ps = 0; // phase_shift_*(si%2);
-      spectrum[si].set_polar(bands[i].magnitude, bands[i].phase + ps);
-    }
-    fft_.inverse(spectrum_, signal_);
-    //data_.signal.multiply(data_.window);
-    for (int i = 0; i < SpectrumSize; ++i)
-    {
-      buffer_.overdub(signal_[i]*window_[i]);
-      //data_.buffer.write(r.read());
-    }
-    size_t widx = buffer_.get_write_index();
-    gen_idx_ = widx > gen_inc_ ? widx - gen_idx_ - 1 : buffer_.size() - 1 - (gen_inc_ - widx);
-    phase_shift_ = (phase_shift_ == 0 ? phase_180 : 0);
+    fill_spectrum<false>();
+    fft_.inverse(spectrum_, signal_a_);
+    read_idx_a_ = 0;
   }
+  
+  if (read_idx_b_ == SpectrumSize)
+  {
+    fill_spectrum<true>();
+    fft_.inverse(spectrum_, signal_b_);
+    read_idx_b_ = 0;
+  }
+  
+  sample_t out = 0;
+  out += signal_a_[read_idx_a_] * window_[read_idx_a_];
+  ++read_idx_a_;
+  out += signal_b_[read_idx_b_] * window_[read_idx_b_];
+  ++read_idx_b_;
+  
+  return out;
+}
 
-  sample_t sample = buffer_.data()[read_idx_];
-  buffer_.data()[read_idx_] = 0.f;
-  read_idx_ = (read_idx_ + 1) % buffer_.size();
-  return sample;
+template <typename T, size_t SpectrumSize>
+VESSL_INLINE size_t spectral<T, SpectrumSize>::get_read_head(size_t idx) const
+{
+  return idx == 0 ? read_idx_a_ : read_idx_b_;
+}
+
+template <typename T, size_t SpectrumSize>
+template<bool ShiftOddPhases>
+VESSL_INLINE void spectral<T, SpectrumSize>::fill_spectrum()
+{
+  spectrum_[0].set_complex(0,0);
+  for (int i = 1; i < spectrum_.size(); ++i)
+  {
+    frequency_band& band = frequencies_[i-1];
+    T m = band.magnitude;
+    // for reasons I do not understand, this only works correctly if z is fully assigned.
+    // initializing z to band.phase and then incrementing it by phase_180 
+    // when ShiftOddPhases is true creates artifacts.
+    // similarly, if band.magnitude is zero and we don't use phase_zero for the phase,
+    // we also generate artifacts.
+    phase_t z;
+    if constexpr (ShiftOddPhases)
+    {
+      z = m>0 ? (i&1 ? band.phase + phase_180 : band.phase) : phase_zero; 
+    }
+    else
+    {
+      z = m>0 ? band.phase : phase_zero;
+    }
+    spectrum_[i].set_polar(m, z);
+  }
 }
 } // namespace generators
 } // namespace vessl

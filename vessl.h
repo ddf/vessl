@@ -901,6 +901,8 @@ public:
 
   ring_buffer operator<<(typename array<T>::reader r);
   
+  using array<T>::fill;
+  
   // add v to the buffer contents at the current write_index and advance the write_index.
   // returns the value that was overwritten.
   T overdub(const T& v);
@@ -1088,6 +1090,7 @@ namespace transform
     complex(T real, T imag) : sample::frame<T,2>(real, imag) {}
     
     void scale(T scalar);
+    void set_complex(T real, T imag);
     void set_polar(T magnitude, phase_t angle);
     
   private:

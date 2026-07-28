@@ -93,6 +93,12 @@ VESSL_INLINE void delay<T>::process(array<T> input, array<T> output)
   }
 }
 
+template <typename T>
+void follow<T>::set_sample_rate(float sample_rate)
+{
+  delta_ = math::exp(-1.0 / (sample_rate*params_.response.value));
+}
+
 template<typename T>
 VESSL_INLINE T follow<T>::process(const T& in) 
 {

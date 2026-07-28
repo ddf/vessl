@@ -79,14 +79,14 @@ public:
   {
     VASSERT(input.size() >= size(), "Input array too small");
     VASSERT(output.size() >= size()/2, "Output array too small");
-    arm_rfft_fast_f32(&rfft_instance_, input.data(), reinterpret_cast<float *>(output.data()), 0);
+    arm_rfft_fast_f32(&rfft_instance_, input.data(), reinterpret_cast<sample_t *>(output.data()), 0);
   }
   
   void inverse(array<complex_t> input, array<sample_t> output)
   {
     VASSERT(input.size() >= size()/2, "Input array too small");
     VASSERT(output.size() >= size(), "Output array too small");
-    arm_rfft_fast_f32(&rfft_instance_, reinterpret_cast<float *>(input.data()), output.data(), 1);
+    arm_rfft_fast_f32(&rfft_instance_, reinterpret_cast<sample_t *>(input.data()), output.data(), 1);
   }
 };
 }

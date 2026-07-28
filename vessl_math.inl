@@ -56,19 +56,19 @@ VESSL_INLINE double abs<double>(const double &val)
 }
 
 template <typename T>
-VESSL_INLINE T epsilon()
+constexpr VESSL_INLINE T epsilon()
 {
   return T(0);
 }
 
 template<>
-VESSL_INLINE float epsilon<float>()
+constexpr VESSL_INLINE float epsilon<float>()
 {
   return FLT_EPSILON;
 }
 
 template<>
-VESSL_INLINE double epsilon<double>()
+constexpr VESSL_INLINE double epsilon<double>()
 {
   return DBL_EPSILON;
 }

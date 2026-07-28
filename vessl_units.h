@@ -421,6 +421,11 @@ public:
   
   [[nodiscard]] const parameter_list & parameters() const override { return *this; }
   [[nodiscard]] VESSL_INLINE frequency_band& get_band(size_t index) { return frequencies_[index]; }
+  // get the frequency in Hz that the index'th band corresponds to.
+  [[nodiscard]] analog_t get_band_frequency(size_t index) const;
+  // get the index of the band that frequency falls within.
+  [[nodiscard]] size_t get_band_index(analog_t frequency) const;
+  
   sample_t generate() override;
   
   size_t get_read_head(size_t idx) const;
@@ -438,6 +443,7 @@ protected:
   array<sample_t> window_;
   size_t read_idx_a_;
   size_t read_idx_b_;
+  analog_t bin_spacing_;
 };
 
 } // namespace generators
@@ -549,7 +555,7 @@ public:
     params_.response.value = response_time_in_seconds;
   }
     
-  void set_sample_rate(float sample_rate) override { delta_ = math::exp(-1.0 / (sample_rate*params_.response.value)); }
+  void set_sample_rate(float sample_rate) override;
   const parameter_list& parameters() const override { return *this; }
     
   parameter response() const { return params_.response("response time", 'r'); }
@@ -559,9 +565,9 @@ public:
   using processor<T>::process;
     
 protected:
-  parameter element_at(size_t index) const override
+  [[nodiscard]] parameter element_at(size_t index) const override
   {
-    parameter p[num] = { response() }; return p[index];
+    return index == 0 ? response() : parameter::none();
   }
     
 private:

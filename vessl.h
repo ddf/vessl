@@ -407,7 +407,7 @@ template<typename T>
 VESSL_INLINE T constrain(T val, T low, T high) { return val < low ? low : val > high ? high : val; }
       
 template<typename T>
-T epsilon();
+constexpr T epsilon();
 
 template<typename T>
 VESSL_INLINE T exp(T v) { return ::exp(v); }

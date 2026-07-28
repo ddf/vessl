@@ -200,6 +200,7 @@ spectral<T, SpectrumSize>::spectral(data &data, analog_t sample_rate)
   , window_(data.window.data(), data.window.size())
   , read_idx_a_(SpectrumSize)
   , read_idx_b_(SpectrumSize/2)
+  , bin_spacing_(sample_rate/SpectrumSize)
 {
   constexpr size_t bands = SpectrumSize/2;
   VASSERT(data.frequencies.size() == bands, "Invalid frequency bands size");
@@ -215,6 +216,23 @@ spectral<T, SpectrumSize>::spectral(data &data, analog_t sample_rate)
   }
   signal_a_.fill(0);
   signal_b_.fill(0);
+}
+
+// since the first element of spectrum_ is the DC offset, we don't represent that in frequencies_
+// this means we have to adjust the index by one when calculating the frequency.
+// for reference, see: https://dsp.stackexchange.com/questions/59519/definition-of-the-dft-fft-bin-size
+template <typename T, size_t SpectrumSize>
+VESSL_INLINE analog_t spectral<T, SpectrumSize>::get_band_frequency(size_t index) const
+{
+  const analog_t k = static_cast<analog_t>(index + 1);
+  return k*bin_spacing_;
+}
+
+template <typename T, size_t SpectrumSize>
+VESSL_INLINE size_t spectral<T, SpectrumSize>::get_band_index(analog_t frequency) const
+{
+  const size_t k = static_cast<size_t>(math::floor(frequency/bin_spacing_));
+  return k - 1;
 }
 
 template <typename T, size_t SpectrumSize>
@@ -253,8 +271,20 @@ template <typename T, size_t SpectrumSize>
 template<bool ShiftOddPhases>
 VESSL_INLINE void spectral<T, SpectrumSize>::fill_spectrum()
 {
+  // @todo gained a better understanding of glitching.
+  // it stems from generating complex numbers for spectrum_
+  // from band magnitudes that are "too small,"
+  // which I think is relative to SpectrumSize.
+  // magnitude needs to be scaled up for a band quite a bit when setting it externally
+  // in order to generate a time-domain signal that is at the level I expect.
+  // experiment with where this amplification occurs.
+  // is it better applied here, or after generation of a time-domain frame?
+  // users of this class should be able to set a [0,1] magnitude in a band
+  // and get comparably leveled audio at the output.
+  static constexpr T mag_min = 16;
   spectrum_[0].set_complex(0,0);
-  for (int i = 1; i < spectrum_.size(); ++i)
+  const int max_band = spectrum_.size() - 1;
+  for (int i = 1; i < max_band; ++i)
   {
     frequency_band& band = frequencies_[i-1];
     T m = band.magnitude;
@@ -266,14 +296,15 @@ VESSL_INLINE void spectral<T, SpectrumSize>::fill_spectrum()
     phase_t z;
     if constexpr (ShiftOddPhases)
     {
-      z = m>0 ? (i&1 ? band.phase + phase_180 : band.phase) : phase_zero; 
+      z = m>mag_min ? (i&1 ? band.phase + phase_180 : band.phase) : (i&1 ? phase_180 : phase_zero); 
     }
     else
     {
-      z = m>0 ? band.phase : phase_zero;
+      z = m>mag_min ? band.phase : phase_zero;
     }
     spectrum_[i].set_polar(m, z);
   }
+  spectrum_[max_band].set_complex(0,0);
 }
 } // namespace generators
 } // namespace vessl

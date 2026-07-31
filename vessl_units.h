@@ -399,10 +399,22 @@ public:
   using sample_t = T;
   using complex_t = transform::complex<T>;
   
-  struct frequency_band
+  class frequency_band
   {
-    phase_t phase = 0;
-    T magnitude = 0;
+    complex_t complex_;
+    T magnitude_;
+  public:
+    constexpr frequency_band() = default;
+    constexpr frequency_band(T magnitude, phase_t phase);
+
+    complex_t to_complex() const;
+    
+    void set_complex(const complex_t& from_complex);
+    void set_polar(T magnitude, phase_t phase);
+    void set_magnitude(T magnitude);
+    
+    VESSL_INLINE T magnitude() const { return magnitude_; }
+    VESSL_INLINE void scale(T scalar) { magnitude_ *= scalar; }
   };
   
   // data.frequencies must have length equal to SpectrumSize/2
@@ -411,7 +423,7 @@ public:
   // data.window must have a length equal to SpectrumSize
   struct data
   {
-    array<frequency_band> frequencies;
+    array<frequency_band> bands;
     array<complex_t> spectrum;
     array<sample_t> signal;
     array<sample_t> window;
@@ -420,7 +432,7 @@ public:
   spectral(data& data, analog_t sample_rate);
   
   [[nodiscard]] const parameter_list & parameters() const override { return *this; }
-  [[nodiscard]] VESSL_INLINE frequency_band& get_band(size_t index) { return frequencies_[index]; }
+  [[nodiscard]] VESSL_INLINE frequency_band& get_band(size_t index) { return bands_[index]; }
   // get the frequency in Hz that the index'th band corresponds to.
   [[nodiscard]] analog_t get_band_frequency(size_t index) const;
   // get the index of the band that frequency falls within.
@@ -436,7 +448,7 @@ protected:
   void fill_spectrum();
   
   fft_t fft_;
-  array<frequency_band> frequencies_;
+  array<frequency_band> bands_;
   array<complex_t> spectrum_;
   array<sample_t> signal_a_;
   array<sample_t> signal_b_;

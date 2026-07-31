@@ -17,10 +17,16 @@ VESSL_INLINE void transform::complex<T>::set_complex(T real, T imag)
 }
 
 template <typename T>
-VESSL_INLINE void transform::complex<T>::set_polar(T magnitude, phase_t angle)
+VESSL_INLINE void transform::complex<T>::set_polar(T magnitude, T angle)
 {
   samples[0] = magnitude * math::cos<T>(angle);
   samples[1] = magnitude * math::sin<T>(angle);
+}
+
+template <typename T>
+VESSL_INLINE T transform::complex<T>::magnitude() const
+{
+  return math::sqrt(samples[0]*samples[0] + samples[1]*samples[1]);
 }
 
 template <typename T>

@@ -1091,7 +1091,8 @@ namespace transform
     
     void scale(T scalar);
     void set_complex(T real, T imag);
-    void set_polar(T magnitude, phase_t angle);
+    void set_polar(T magnitude, T angle);
+    T magnitude() const;
     
   private:
     using sample::frame<T,2>::samples;

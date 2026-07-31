@@ -190,10 +190,45 @@ VESSL_INLINE parameter clock<T>::element_at(size_t index) const
 }
 
 template <typename T, size_t SpectrumSize>
+constexpr spectral<T, SpectrumSize>::frequency_band::frequency_band(T magnitude, phase_t phase)
+: magnitude_(magnitude)
+{
+  complex_.set_polar(1.f, phase);
+}
+
+template <typename T, size_t SpectrumSize>
+VESSL_INLINE typename spectral<T, SpectrumSize>::complex_t spectral<T, SpectrumSize>::frequency_band::to_complex() const
+{
+  complex_t ret(complex_);
+  ret.scale(magnitude_);
+  return ret;
+}
+
+template <typename T, size_t SpectrumSize>
+VESSL_INLINE void spectral<T, SpectrumSize>::frequency_band::set_complex(const complex_t &from_complex)
+{
+  magnitude = from_complex.magnitude(); 
+  complex_.set_complex(from_complex.samples[0]/magnitude, from_complex.samples[1]/magnitude);
+}
+
+template <typename T, size_t SpectrumSize>
+VESSL_INLINE void spectral<T, SpectrumSize>::frequency_band::set_polar(T magnitude, phase_t phase)
+{
+  magnitude_ = magnitude;
+  complex_.set_polar(1.f, phase);
+}
+
+template <typename T, size_t SpectrumSize>
+VESSL_INLINE void spectral<T, SpectrumSize>::frequency_band::set_magnitude(T magnitude)
+{
+  magnitude_ = magnitude;
+}
+
+template <typename T, size_t SpectrumSize>
 spectral<T, SpectrumSize>::spectral(data &data, analog_t sample_rate)
   : unit_generator<T>()
   , fft_(SpectrumSize)
-  , frequencies_(data.frequencies.data(), data.frequencies.size())
+  , bands_(data.bands.data(), data.bands.size())
   , spectrum_(data.spectrum.data(), data.spectrum.size())
   , signal_a_(data.signal.data(), SpectrumSize)
   , signal_b_(data.signal.data() + SpectrumSize, SpectrumSize)
@@ -203,36 +238,33 @@ spectral<T, SpectrumSize>::spectral(data &data, analog_t sample_rate)
   , bin_spacing_(sample_rate/SpectrumSize)
 {
   constexpr size_t bands = SpectrumSize/2;
-  VASSERT(data.frequencies.size() == bands, "Invalid frequency bands size");
+  VASSERT(data.bands.size() == bands, "Invalid frequency bands size");
   VASSERT(data.spectrum.size() == bands, "Invalid spectrum size");
   VASSERT(data.window.size() == SpectrumSize, "Invalid window size");
   VASSERT(data.signal.size() == SpectrumSize*Overlap, "Invalid signal size");
 
   for (int i = 0; i < bands; ++i)
   {
-    frequency_band& band = frequencies_[i];
-    band.magnitude = 0;
-    band.phase = math::random::u32();
+    frequency_band& band = bands_[i];
+    band.set_polar(0, math::random::u32()/2);
   }
   signal_a_.fill(0);
   signal_b_.fill(0);
 }
 
-// since the first element of spectrum_ is the DC offset, we don't represent that in frequencies_
-// this means we have to adjust the index by one when calculating the frequency.
 // for reference, see: https://dsp.stackexchange.com/questions/59519/definition-of-the-dft-fft-bin-size
 template <typename T, size_t SpectrumSize>
 VESSL_INLINE analog_t spectral<T, SpectrumSize>::get_band_frequency(size_t index) const
 {
-  const analog_t k = static_cast<analog_t>(index + 1);
+  const analog_t k = static_cast<analog_t>(index);
   return k*bin_spacing_;
 }
 
 template <typename T, size_t SpectrumSize>
 VESSL_INLINE size_t spectral<T, SpectrumSize>::get_band_index(analog_t frequency) const
 {
-  const size_t k = static_cast<size_t>(math::floor(frequency/bin_spacing_));
-  return k - 1;
+  const size_t k = static_cast<size_t>(math::round(frequency/bin_spacing_));
+  return k;
 }
 
 template <typename T, size_t SpectrumSize>
@@ -281,30 +313,33 @@ VESSL_INLINE void spectral<T, SpectrumSize>::fill_spectrum()
   // is it better applied here, or after generation of a time-domain frame?
   // users of this class should be able to set a [0,1] magnitude in a band
   // and get comparably leveled audio at the output.
-  static constexpr T mag_min = 16;
+  static constexpr T mag_zero  = cast<T>(0);
+  static constexpr T mag_min   = cast<T>(1.f/SpectrumSize);
+  static constexpr T mag_scale = cast<T>(static_cast<analog_t>(SpectrumSize)/32.f);
   spectrum_[0].set_complex(0,0);
-  const int max_band = spectrum_.size() - 1;
+  const int max_band = spectrum_.size();
   for (int i = 1; i < max_band; ++i)
   {
-    frequency_band& band = frequencies_[i-1];
-    T m = band.magnitude;
-    // for reasons I do not understand, this only works correctly if z is fully assigned.
-    // initializing z to band.phase and then incrementing it by phase_180 
-    // when ShiftOddPhases is true creates artifacts.
-    // similarly, if band.magnitude is zero and we don't use phase_zero for the phase,
-    // we also generate artifacts.
-    phase_t z;
-    if constexpr (ShiftOddPhases)
+    frequency_band& band = bands_[i];
+    T m = band.magnitude() > mag_min ? band.magnitude() * mag_scale : mag_zero;
+    complex_t cmplx(0,0);
+    //if (m > mag_zero)
     {
-      z = m>mag_min ? (i&1 ? band.phase + phase_180 : band.phase) : (i&1 ? phase_180 : phase_zero); 
+      if constexpr (ShiftOddPhases)
+      {
+        T s = i&1 ? -1 : 1;
+        cmplx = band.to_complex();
+        cmplx.scale(s*m);
+      }
+      else
+      {
+        cmplx = band.to_complex();
+        cmplx.scale(m);
+      }
     }
-    else
-    {
-      z = m>mag_min ? band.phase : phase_zero;
-    }
-    spectrum_[i].set_polar(m, z);
+    spectrum_[i] = cmplx;
   }
-  spectrum_[max_band].set_complex(0,0);
+  // spectrum_[max_band].set_complex(0,0);
 }
 } // namespace generators
 } // namespace vessl

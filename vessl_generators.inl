@@ -303,7 +303,7 @@ template <typename T, size_t SpectrumSize>
 template<bool ShiftOddPhases>
 VESSL_INLINE void spectral<T, SpectrumSize>::fill_spectrum()
 {
-  // @todo gained a better understanding of glitching.
+  // gained a better understanding of glitching.
   // it stems from generating complex numbers for spectrum_
   // from band magnitudes that are "too small,"
   // which I think is relative to SpectrumSize.
@@ -316,11 +316,12 @@ VESSL_INLINE void spectral<T, SpectrumSize>::fill_spectrum()
   static constexpr T mag_zero  = cast<T>(0);
   static constexpr T mag_min   = cast<T>(1.f/SpectrumSize);
   static constexpr T mag_scale = cast<T>(static_cast<analog_t>(SpectrumSize)/32.f);
+  // DC component
   spectrum_[0].set_complex(0,0);
-  const int max_band = spectrum_.size();
-  for (int i = 1; i < max_band; ++i)
+  const size_t max_band = spectrum_.size();
+  for (size_t i = 1; i < max_band; ++i)
   {
-    frequency_band& band = bands_[i];
+    const frequency_band& band = bands_[i];
     T m = band.magnitude() > mag_min ? band.magnitude() * mag_scale : mag_zero;
     complex_t cmplx(0,0);
     //if (m > mag_zero)
@@ -339,7 +340,6 @@ VESSL_INLINE void spectral<T, SpectrumSize>::fill_spectrum()
     }
     spectrum_[i] = cmplx;
   }
-  // spectrum_[max_band].set_complex(0,0);
 }
 } // namespace generators
 } // namespace vessl

@@ -30,6 +30,13 @@ VESSL_INLINE T transform::complex<T>::magnitude() const
 }
 
 template <typename T>
+phase_t transform::complex<T>::phase() const
+{
+  T phase_rad = math::atan2<T>(samples[1], samples[0]);
+  return cast<phase_t>(phase_rad / math::two_pi<T>());
+}
+
+template <typename T>
 VESSL_INLINE transform::fft<T>::fft() { static_assert("fft is not available for this type"); }
 
 template <typename T>

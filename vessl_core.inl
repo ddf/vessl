@@ -245,9 +245,8 @@ VESSL_INLINE array<T> array<T>::scale(T value, array dest) const
 template<typename T>
 VESSL_INLINE array<T> array<T>::multiply(array other, array dest) const
 {
-  VASSERT(size_ == other.size_
-    && size_ <= dest.size_
-    , "arrays are have different lengths or destination is too small");
+  VASSERT(size_ == other.size_ && size_ <= dest.size_, 
+    "arrays are have different lengths or destination is too small");
   reader a(data_, size_);
   reader b(other.data_, other.size_);
   writer c(dest.data_, dest.size_);

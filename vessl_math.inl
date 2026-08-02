@@ -249,6 +249,12 @@ struct lerper<T,phase_t>
   }
 };
 
+template <typename T>
+T atan2(T y, T x)
+{
+  return cast<T>(::atan2(cast<double>(y), cast<double>(x)));
+}
+
 template <typename T, typename D>
 VESSL_INLINE T lerp(T begin, T end, D t)
 {

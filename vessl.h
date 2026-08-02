@@ -456,6 +456,9 @@ VESSL_INLINE T sqrt2() { static T v = sqrt(2); return v; }
 
 template<typename T>
 VESSL_INLINE T tan(T x) { return ::tan(x); }
+
+template<typename T>
+T atan2(T y, T x);
     
 analog_t decibels_to_scale(analog_t db);
 
@@ -798,7 +801,6 @@ enum class type : uint8_t
 
 template<typename T>
 void render(type window_type, array<T> output);
-
 }
 
 namespace interpolation
@@ -1093,6 +1095,7 @@ namespace transform
     void set_complex(T real, T imag);
     void set_polar(T magnitude, T angle);
     T magnitude() const;
+    phase_t phase() const;
     
   private:
     using sample::frame<T,2>::samples;

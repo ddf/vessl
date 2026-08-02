@@ -157,6 +157,18 @@ VESSL_INLINE float32_t sqrt(float32_t x)
   }
   return 0;
 }
+
+// @todo not available in the version of CMSIS OWL uses, need to define based on CMSIS version.
+// template<>
+// VESSL_INLINE float32_t atan2<float32_t, float32_t>(float32_t y, float32_t x)
+// {
+//   float32_t out;
+//   if (ARM_MATH_SUCCESS == arm_atan2_f32(x, y, &out))
+//   {
+//     return out;
+//   }
+//   return 0;
+// }
 } // namespace math
   
 namespace filtering

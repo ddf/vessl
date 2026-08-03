@@ -839,6 +839,14 @@ void crossfade(const T& a, const T& b, analog_t f, T* c);
 template<typename T>
 void crossfade(const T& a, const T& b, analog_t f, T* c);
 
+// element-wise crossfade of the contents of a and b with the result written to c.
+template<typename E, typename T>
+void mix(array<T> a, array<T> b, analog_t f, array<T> c);
+
+// mix with a linear fade
+template<typename T>
+void mix(array<T> a, array<T> b, analog_t f, array<T> c);
+
 // mix a mono sample up to a multi-channel frame.
 // pan [-1,1]: placement of the mono sample in the multi-channel frame,
 // where -1 is only in the first channel, 1 is only in the last channel

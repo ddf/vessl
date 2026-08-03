@@ -607,7 +607,22 @@ VESSL_INLINE void vessl::sample::crossfade(const T& a, const T& b, analog_t f, T
 template <typename T>
 VESSL_INLINE void vessl::sample::crossfade(const T &a, const T &b, analog_t f, T *c)
 {
-  return crossfade<math::easing::linear>(a, b, f, c);
+  crossfade<math::easing::linear>(a, b, f, c);
+}
+
+template <typename E, typename T>
+void vessl::sample::mix(array<T> a, array<T> b, analog_t f, array<T> c)
+{
+  for (int i = 0; i < a.size(); ++i)
+  {
+    crossfade<E>(a[i], b[i], f, &c[i]);
+  }
+}
+
+template <typename T>
+VESSL_INLINE void vessl::sample::mix(array<T> a, array<T> b, analog_t f, array<T> c)
+{
+  mix<math::easing::linear>(a, b, f, c);
 }
 
 // tried providing this very specific specialization to see if it would improve performance 

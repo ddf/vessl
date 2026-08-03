@@ -3,36 +3,57 @@
 namespace vessl
 {
 template <typename T>
-void transform::complex<T>::scale(T scalar)
+VESSL_INLINE void transform::complex<T>::scale(T scalar)
 {
-  samples[0] *= scalar;
-  samples[1] *= scalar;
+  r *= scalar;
+  i *= scalar;
+}
+
+template <typename T>
+VESSL_INLINE void transform::complex<T>::add(const complex &other)
+{
+  r += other.r;
+  i += other.i;
+}
+
+template <typename T>
+VESSL_INLINE void transform::complex<T>::subtract(const complex &other)
+{
+  r -= other.r;
+  i -= other.i;
+}
+
+template <typename T>
+void transform::complex<T>::multiply(const complex &other)
+{
+  r *= other.r;
+  i *= other.i;
 }
 
 template <typename T>
 VESSL_INLINE void transform::complex<T>::set_complex(T real, T imag)
 {
-  samples[0] = real;
-  samples[1] = imag;
+  r = real;
+  i = imag;
 }
 
 template <typename T>
 VESSL_INLINE void transform::complex<T>::set_polar(T magnitude, T angle)
 {
-  samples[0] = magnitude * math::cos<T>(angle);
-  samples[1] = magnitude * math::sin<T>(angle);
+  r = magnitude * math::cos<T>(angle);
+  i = magnitude * math::sin<T>(angle);
 }
 
 template <typename T>
 VESSL_INLINE T transform::complex<T>::magnitude() const
 {
-  return math::sqrt(samples[0]*samples[0] + samples[1]*samples[1]);
+  return math::sqrt(r*r + i*i);
 }
 
 template <typename T>
 phase_t transform::complex<T>::phase() const
 {
-  T phase_rad = math::atan2<T>(samples[1], samples[0]);
+  T phase_rad = math::atan2<T>(i, r);
   return cast<phase_t>(phase_rad / math::two_pi<T>());
 }
 

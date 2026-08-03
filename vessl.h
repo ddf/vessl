@@ -1085,20 +1085,49 @@ struct biquad
 namespace transform 
 {
   template<typename T>
-  struct complex : private sample::frame<T,2>
+  struct complex
   {
-    complex() : sample::frame<T,2>() {}
-    explicit complex(T real) : sample::frame<T,2>(real, 0) {}
-    complex(T real, T imag) : sample::frame<T,2>(real, imag) {}
+    T r, i;
     
-    void scale(T scalar);
+    complex() : r(0), i(0) {}
+    complex(const complex& other) : r(other.r), i(other.i) {}
+    explicit complex(T real) : r(real), i(0) {}
+    complex(T real, T imag) : r(real), i(imag) {}
+    
     void set_complex(T real, T imag);
     void set_polar(T magnitude, T angle);
+    
     T magnitude() const;
     phase_t phase() const;
     
-  private:
-    using sample::frame<T,2>::samples;
+    void scale(T scalar);
+    void add(const complex& other);
+    void subtract(const complex& other);
+    void multiply(const complex& other);
+    
+    friend complex operator+(complex lhs, const complex& rhs)
+    {
+      lhs.add(rhs);
+      return lhs;
+    }
+    
+    friend complex operator-(complex lhs, const complex& rhs)
+    {
+      lhs.subtract(rhs);
+      return lhs;
+    }
+    
+    friend complex operator*(complex lhs, const float scalar)
+    {
+      lhs.scale(scalar);
+      return lhs;
+    }
+    
+    friend complex operator*(complex lhs, const complex& rhs)
+    {
+      lhs.multiply(rhs);
+      return lhs;
+    }
   };
 
   // note: currently only implemented for float32_t on ARM

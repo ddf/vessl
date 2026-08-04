@@ -19,6 +19,38 @@ VESSL_INLINE analog_t scale_to_decibels(analog_t scale)
   return log10(scale)*cast<analog_t>(20.0);
 }
 
+VESSL_INLINE float elc::a(float f_hz)
+{
+  float f2 = f_hz * f_hz;
+  return 1.2588966f * 148840000.f * f2*f2 /
+         ((f2 + 424.36) * sqrt((f2 + 11599.29f) * (f2 + 544496.41f)) * (f2 + 148840000.f));
+}
+
+VESSL_INLINE analog_t elc::b(analog_t f_hz)
+{
+  analog_t f2 = f_hz * f_hz;
+  return 1.019764760044717f * 148840000.f * f_hz*f2 /
+         ((f2 + 424.36f) * sqrt(f2 + 25122.25f) * (f2 + 148840000.f));
+}
+
+VESSL_INLINE analog_t elc::c(analog_t f_hz)
+{
+  analog_t f2 = f_hz * f_hz;
+  return 1.0069316688518042f * 148840000.f * f2 /
+         ((f2 + 424.36f) * (f2 + 148840000.f));
+}
+
+VESSL_INLINE analog_t elc::d(analog_t f_hz)
+{
+  analog_t f2 = f_hz * f_hz;
+  return (f_hz / 6.8966888496476e-5f) * sqrt(
+             (
+               ((1037918.48f - f2)*(1037918.48f - f2) + 1080768.16f*f2) /
+               ((9837328.f - f2)*(9837328.f - f2) + 11723776.f * f2)
+             ) / ((f2 + 79919.29f) * (f2 + 1345600.f))
+             );
+}
+
 template<>
 VESSL_INLINE analog_t sin<analog_t, phase_t>(phase_t z) 
 { 

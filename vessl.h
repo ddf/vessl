@@ -479,6 +479,16 @@ VESSL_INLINE binary_t is_nan(T n) { return isnan(n); }
 // xore because xor is a keyword
 template<typename T>
 VESSL_INLINE T xore(const T& a, const T& b) { return a ^ b; }
+
+namespace elc
+{
+// Functions are ported from https://github.com/audiojs/a-weighting
+// But see also: https://en.wikipedia.org/wiki/A-weighting
+analog_t a(analog_t f_hz);
+analog_t b(analog_t f_hz);
+analog_t c(analog_t f_hz);
+analog_t d(analog_t f_hz);
+}
   
 namespace random
 {

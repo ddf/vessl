@@ -406,6 +406,8 @@ public:
   public:
     constexpr frequency_band() = default;
     constexpr frequency_band(T magnitude, phase_t phase);
+    
+    frequency_band& operator=(const frequency_band& other);
 
     complex_t to_complex() const;
     
@@ -414,6 +416,10 @@ public:
     void set_magnitude(T magnitude);
     
     VESSL_INLINE T magnitude() const { return magnitude_; }
+    VESSL_INLINE phase_t phase() const { return complex_.phase(); }
+    
+    void add(const frequency_band& other);
+    void subtract(const frequency_band& other);
     VESSL_INLINE void scale(T scalar) { magnitude_ *= scalar; }
   };
   

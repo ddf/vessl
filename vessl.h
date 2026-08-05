@@ -1123,6 +1123,8 @@ namespace transform
     void subtract(const complex& other);
     void multiply(const complex& other);
     
+    complex& operator=(const complex& other);
+    
     friend complex operator+(complex lhs, const complex& rhs)
     {
       lhs.add(rhs);

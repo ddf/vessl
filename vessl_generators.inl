@@ -197,6 +197,20 @@ constexpr spectral<T, SpectrumSize>::frequency_band::frequency_band(T magnitude,
 }
 
 template <typename T, size_t SpectrumSize>
+VESSL_INLINE typename spectral<T, SpectrumSize>::frequency_band& spectral<T, SpectrumSize>::frequency_band::operator=(
+    const frequency_band &other)
+{
+  if (this == &other)
+  {
+    return *this;
+  }
+  
+  complex_ = other.complex_;
+  magnitude_ = other.magnitude_;
+  return *this;
+}
+
+template <typename T, size_t SpectrumSize>
 VESSL_INLINE typename spectral<T, SpectrumSize>::complex_t spectral<T, SpectrumSize>::frequency_band::to_complex() const
 {
   complex_t ret(complex_);
@@ -222,6 +236,20 @@ template <typename T, size_t SpectrumSize>
 VESSL_INLINE void spectral<T, SpectrumSize>::frequency_band::set_magnitude(T magnitude)
 {
   magnitude_ = magnitude;
+}
+
+template <typename T, size_t SpectrumSize>
+VESSL_INLINE void spectral<T, SpectrumSize>::frequency_band::add(const frequency_band &other)
+{
+  complex_.add(other.complex_);
+  magnitude_ += other.magnitude_;
+}
+
+template <typename T, size_t SpectrumSize>
+void spectral<T, SpectrumSize>::frequency_band::subtract(const frequency_band &other)
+{
+  complex_.subtract(other.complex_);
+  magnitude_ -= other.magnitude_;
 }
 
 template <typename T, size_t SpectrumSize>

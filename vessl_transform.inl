@@ -24,10 +24,20 @@ VESSL_INLINE void transform::complex<T>::subtract(const complex &other)
 }
 
 template <typename T>
-void transform::complex<T>::multiply(const complex &other)
+VESSL_INLINE void transform::complex<T>::multiply(const complex &other)
 {
-  r *= other.r;
-  i *= other.i;
+  T rr = r*other.r - i*other.i;
+  T ii = r*other.i + i*other.r;
+  r = rr;
+  i = ii;
+}
+
+template <typename T>
+VESSL_INLINE transform::complex<T> & transform::complex<T>::operator=(const complex &other)
+{
+  r = other.r;
+  i = other.i;
+  return *this;
 }
 
 template <typename T>

@@ -89,6 +89,21 @@ static constexpr phase_t phase_90   = phase_180 >> 1;
 static constexpr phase_t phase_270  = phase_180 + phase_90;
 static constexpr phase_t phase_zero = 0UL;
 
+template<typename T>
+struct frequency
+{
+  // normalized representation, allows for representing frequency with q31.
+  T norm;
+  
+  explicit constexpr  frequency(T normalized) : norm(normalized) {}
+  
+  static frequency of_hertz(analog_t hz, analog_t sample_rate);
+  static frequency of_midi_note(analog_t midi_note_number, analog_t sample_rate);
+  
+  analog_t as_midi_note(analog_t sample_rate) const;
+  analog_t as_hertz(analog_t sample_rate) const;
+};
+
 // we use this in place of static_cast throughout the library for non-pointer types
 // so that we can specialize conversions between some of our value types (e.g. phase_t <--> analog_t)
 template<typename T, typename F>

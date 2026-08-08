@@ -155,6 +155,37 @@ VESSL_INLINE void matrix<T>::clear()
   arr.fill(T(0LL));
 }
 
+template <typename T>
+VESSL_INLINE frequency<T> frequency<T>::of_hertz(analog_t hz, analog_t sample_rate)
+{
+  return frequency(cast<T>(hz / sample_rate));
+}
+
+#define HZA4       440.0f
+#define MIDIA4     69.0f
+#define MIDIOCTAVE 12.0f
+
+template <typename T>
+VESSL_INLINE frequency<T> frequency<T>::of_midi_note(analog_t midi_note_number, analog_t sample_rate)
+{
+  analog_t hz = HZA4 * math::pow(2.0f, (midi_note_number - MIDIA4) / MIDIOCTAVE);
+  return frequency(cast<T>(hz / sample_rate));
+}
+
+template <typename T>
+VESSL_INLINE analog_t frequency<T>::as_midi_note(analog_t sample_rate) const
+{
+  const analog_t hz = cast<analog_t>(norm) * sample_rate;
+  const analog_t midi_note = MIDIA4 + MIDIOCTAVE * math::log(hz / HZA4) / math::log(2.0);
+  return midi_note;
+}
+
+template <typename T>
+VESSL_INLINE analog_t frequency<T>::as_hertz(analog_t sample_rate) const
+{
+  return cast<analog_t>(norm) * sample_rate;
+}
+
 // @todo ARM specialization
 template<typename T>
 VESSL_INLINE void array<T>::writer::write(const reader& r)

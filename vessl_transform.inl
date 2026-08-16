@@ -3,37 +3,41 @@
 namespace vessl
 {
 template <typename T>
-VESSL_INLINE void transform::complex<T>::scale(T scalar)
+VESSL_INLINE transform::complex<T>& transform::complex<T>::scale(T scalar)
 {
   r *= scalar;
   i *= scalar;
+  return *this;
 }
 
 template <typename T>
-VESSL_INLINE void transform::complex<T>::add(const complex &other)
+VESSL_INLINE transform::complex<T>& transform::complex<T>::add(const complex &other)
 {
   r += other.r;
   i += other.i;
+  return *this;
 }
 
 template <typename T>
-VESSL_INLINE void transform::complex<T>::subtract(const complex &other)
+VESSL_INLINE transform::complex<T>& transform::complex<T>::subtract(const complex &other)
 {
   r -= other.r;
   i -= other.i;
+  return *this;
 }
 
 template <typename T>
-VESSL_INLINE void transform::complex<T>::multiply(const complex &other)
+VESSL_INLINE transform::complex<T>& transform::complex<T>::multiply(const complex &other)
 {
   T rr = r*other.r - i*other.i;
   T ii = r*other.i + i*other.r;
   r = rr;
   i = ii;
+  return *this;
 }
 
 template <typename T>
-VESSL_INLINE transform::complex<T> & transform::complex<T>::operator=(const complex &other)
+VESSL_INLINE transform::complex<T>& transform::complex<T>::operator=(const complex &other)
 {
   r = other.r;
   i = other.i;

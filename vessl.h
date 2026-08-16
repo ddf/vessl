@@ -1133,10 +1133,10 @@ namespace transform
     T magnitude() const;
     phase_t phase() const;
     
-    void scale(T scalar);
-    void add(const complex& other);
-    void subtract(const complex& other);
-    void multiply(const complex& other);
+    complex& scale(T scalar);
+    complex& add(const complex& other);
+    complex& subtract(const complex& other);
+    complex& multiply(const complex& other);
     
     complex& operator=(const complex& other);
     

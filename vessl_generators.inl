@@ -219,10 +219,10 @@ VESSL_INLINE typename spectral<T, SpectrumSize>::complex_t spectral<T, SpectrumS
 }
 
 template <typename T, size_t SpectrumSize>
-VESSL_INLINE void spectral<T, SpectrumSize>::frequency_band::set_complex(const complex_t &from_complex)
+VESSL_INLINE void spectral<T, SpectrumSize>::frequency_band::set_complex(const complex_t& from_complex)
 {
-  magnitude = from_complex.magnitude(); 
-  complex_.set_complex(from_complex.samples[0]/magnitude, from_complex.samples[1]/magnitude);
+  complex_ = from_complex;
+  magnitude_ = complex_.normalize();
 }
 
 template <typename T, size_t SpectrumSize>
@@ -241,15 +241,21 @@ VESSL_INLINE void spectral<T, SpectrumSize>::frequency_band::set_magnitude(T mag
 template <typename T, size_t SpectrumSize>
 VESSL_INLINE void spectral<T, SpectrumSize>::frequency_band::add(const frequency_band &other)
 {
-  complex_.add(other.complex_);
-  magnitude_ += other.magnitude_;
+  complex_t lhs = to_complex();
+  complex_t rhs = other.to_complex();
+  complex_.r = lhs.r + rhs.r;
+  complex_.i = lhs.r + rhs.r;
+  magnitude_ = complex_.normalize();
 }
 
 template <typename T, size_t SpectrumSize>
 void spectral<T, SpectrumSize>::frequency_band::subtract(const frequency_band &other)
 {
-  complex_.subtract(other.complex_);
-  magnitude_ -= other.magnitude_;
+  complex_t lhs = to_complex();
+  complex_t rhs = other.to_complex();
+  complex_.r = lhs.r - rhs.r;
+  complex_.i = lhs.r - rhs.r;
+  magnitude_ = complex_.normalize();
 }
 
 template <typename T, size_t SpectrumSize>
@@ -269,9 +275,9 @@ spectral<T, SpectrumSize>::spectral(data &data, analog_t sample_rate)
   VASSERT(data.bands.size() == bands, "Invalid frequency bands size");
   VASSERT(data.spectrum.size() == bands, "Invalid spectrum size");
   VASSERT(data.window.size() == SpectrumSize, "Invalid window size");
-  VASSERT(data.signal.size() == SpectrumSize*Overlap, "Invalid signal size");
+  VASSERT(data.signal.size() == SpectrumSize*2, "Invalid signal size");
 
-  for (int i = 0; i < bands; ++i)
+  for (size_t i = 1; i < bands; ++i)
   {
     frequency_band& band = bands_[i];
     band.set_polar(0, math::random::u32()/2);
@@ -346,7 +352,7 @@ VESSL_INLINE void spectral<T, SpectrumSize>::fill_spectrum()
   static constexpr T mag_scale = cast<T>(static_cast<analog_t>(SpectrumSize)/32.f);
   // DC component
   spectrum_[0].set_complex(0,0);
-  const size_t max_band = spectrum_.size();
+  const size_t max_band = spectrum_.size() - 1;
   for (size_t i = 1; i < max_band; ++i)
   {
     const frequency_band& band = bands_[i];

@@ -1129,6 +1129,16 @@ namespace transform
     
     void set_complex(T real, T imag);
     void set_polar(T magnitude, T angle);
+
+    static complex<T> from_polar(T magnitude, T angle)
+    {
+      complex<T> c;
+      c.set_polar(magnitude, angle);
+      return c;
+    }
+
+    // normalize this number and return what the magnitude was.
+    T normalize();
     
     T magnitude() const;
     phase_t phase() const;

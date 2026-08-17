@@ -58,7 +58,20 @@ VESSL_INLINE void transform::complex<T>::set_polar(T magnitude, T angle)
   i = magnitude * math::sin<T>(angle);
 }
 
-template <typename T>
+template<typename T>
+VESSL_INLINE T transform::complex<T>::normalize()
+{
+  T msqr = r*r + i*i;
+  T m = msqr > 0 ? math::sqrt(msqr) : 0;
+  if (m > 0)
+  {
+    r /= m;
+    i /= m;
+  }
+  return m;
+}
+
+template<typename T>
 VESSL_INLINE T transform::complex<T>::magnitude() const
 {
   return math::sqrt(r*r + i*i);
@@ -86,12 +99,12 @@ VESSL_INLINE void transform::fft<T>::size() const {}
 template <typename T>
 VESSL_INLINE void transform::fft<T>::forward(array<sample_t> input, array<complex_t> output) {}
 
-template <typename T>
-VESSL_INLINE void transform::fft<T>::inverse(array<complex_t> input, array<sample_t> output) {}
+template <typename T> VESSL_INLINE void transform::fft<T>::inverse(array<complex_t> input, array<sample_t> output) {}
 } // namespace vessl
 
 #ifdef ARM_CORTEX
 #include <arm_math.h>
+#include "vessl.h"
 
 namespace vessl
 {

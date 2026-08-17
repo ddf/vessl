@@ -100,7 +100,7 @@ struct matrix_data<float32_t>
 template<>
 VESSL_INLINE matrix<float32_t> matrix<float32_t>::add(matrix<float32_t> other, matrix<float32_t> dest) const
 {
-  VASSERT(rows == other.rows && rows == dest.rows && columns == other.columns && colums == dest.columns, "matrices do not have the same dimentions");
+  VASSERT(rows() == other.rows() && rows() == dest.rows() && columns() == other.columns() && columns() == dest.columns(), "matrices do not have the same dimentions");
   arm_mat_add_f32(&data_.inst, &other.data_.inst, &dest.data_.inst);
   return dest;
 }
@@ -108,7 +108,7 @@ VESSL_INLINE matrix<float32_t> matrix<float32_t>::add(matrix<float32_t> other, m
 template<>
 VESSL_INLINE matrix<float32_t> matrix<float32_t>::subtract(matrix other, matrix dest) const
 {
-  VASSERT(rows == other.rows && rows == dest.rows && columns == other.columns && colums == dest.columns, "matrices do not have the same dimentions");
+  VASSERT(rows() == other.rows() && rows() == dest.rows() && columns() == other.columns() && columns() == dest.columns(), "matrices do not have the same dimentions");
   arm_mat_sub_f32(&data_.inst, &other.data_.inst, &dest.data_.inst);
   return dest;
 }
@@ -123,9 +123,9 @@ VESSL_INLINE matrix<float32_t> matrix<float32_t>::scale(float32_t value, matrix 
 template<>
 VESSL_INLINE matrix<float32_t> matrix<float32_t>::multiply(matrix other, matrix dest) const
 {
-  VASSERT(getColumns() == other.getRows(), "Incompatible matrix sizes in operands");
-  VASSERT(dest.getRows() == getRows(), "Incorrect number of rows in destination");
-  VASSERT(dest.getColumns() == other.getColumns(), "Incorrect number of columns in destination");
+  VASSERT(columns() == other.rows(), "Incompatible matrix sizes in operands");
+  VASSERT(dest.rows() == rows(), "Incorrect number of rows in destination");
+  VASSERT(dest.columns() == other.columns(), "Incorrect number of columns in destination");
   arm_mat_mult_f32(&data_.inst, &other.data_.inst, &dest.data_.inst);
   return dest;
 }

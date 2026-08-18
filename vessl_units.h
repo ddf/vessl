@@ -390,8 +390,9 @@ private:
 // SpectrumSize is the size of the FFT to use.
 // This will determine the length of the blocks of time-domain signal
 // that are overlapped to produce this generator's output.
+// Overlap is how much to overlap generations.
 // The number of frequency bands available will be SpectrumSize/2 - 1.
-template<typename T, size_t SpectrumSize>
+template<typename T, size_t SpectrumSize, size_t Overlap = 1>
 class spectral : public unit_generator<T>, plist<0>
 {
 public:
@@ -426,7 +427,7 @@ public:
   
   // data.frequencies must have length equal to SpectrumSize/2
   // data.spectrum must have a length equal to SpectrumSize/2
-  // data.signal must have a length equal to SpectrumSize*2
+  // data.signal must have a length equal to SpectrumSize*Overlap*2
   // data.window must have a length equal to SpectrumSize
   struct data
   {
@@ -448,6 +449,7 @@ public:
   sample_t generate() override;
   
   size_t get_read_head(size_t idx) const;
+  size_t get_overlap_count() const { return overlap_count_; }
 
 protected:
   // set contents of spectrum_ based on contents of frequencies_
@@ -457,11 +459,12 @@ protected:
   fft_t fft_;
   array<frequency_band> bands_;
   array<complex_t> spectrum_;
-  array<sample_t> signal_a_;
-  array<sample_t> signal_b_;
+  array<sample_t> signal_[Overlap*2];
   array<sample_t> window_;
-  size_t read_idx_a_;
-  size_t read_idx_b_;
+  size_t read_idx_[Overlap*2];
+  size_t overlap_size_;
+  size_t overlap_count_;
+  size_t signal_idx_;
   analog_t bin_spacing_;
 };
 

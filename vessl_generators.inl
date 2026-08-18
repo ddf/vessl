@@ -189,16 +189,19 @@ VESSL_INLINE parameter clock<T>::element_at(size_t index) const
   return tempo();
 }
 
-template <typename T, size_t SpectrumSize>
-constexpr spectral<T, SpectrumSize>::frequency_band::frequency_band(T magnitude, phase_t phase)
+////////////////////////////////////////////////////////////////////////////////////////////////////////
+// spectral
+//
+template <typename T, size_t SpectrumSize, size_t Overlap>
+constexpr spectral<T, SpectrumSize, Overlap>::frequency_band::frequency_band(T magnitude, phase_t phase)
 : magnitude_(magnitude)
 {
   complex_.set_polar(1.f, phase);
 }
 
-template <typename T, size_t SpectrumSize>
-VESSL_INLINE typename spectral<T, SpectrumSize>::frequency_band& spectral<T, SpectrumSize>::frequency_band::operator=(
-    const frequency_band &other)
+template <typename T, size_t SpectrumSize, size_t Overlap>
+VESSL_INLINE typename spectral<T, SpectrumSize, Overlap>::frequency_band& 
+spectral<T, SpectrumSize, Overlap>::frequency_band::operator=(const frequency_band &other)
 {
   if (this == &other)
   {
@@ -210,36 +213,37 @@ VESSL_INLINE typename spectral<T, SpectrumSize>::frequency_band& spectral<T, Spe
   return *this;
 }
 
-template <typename T, size_t SpectrumSize>
-VESSL_INLINE typename spectral<T, SpectrumSize>::complex_t spectral<T, SpectrumSize>::frequency_band::to_complex() const
+template <typename T, size_t SpectrumSize, size_t Overlap>
+VESSL_INLINE typename spectral<T, SpectrumSize, Overlap>::complex_t 
+spectral<T, SpectrumSize, Overlap>::frequency_band::to_complex() const
 {
   complex_t ret(complex_);
   ret.scale(magnitude_);
   return ret;
 }
 
-template <typename T, size_t SpectrumSize>
-VESSL_INLINE void spectral<T, SpectrumSize>::frequency_band::set_complex(const complex_t& from_complex)
+template <typename T, size_t SpectrumSize, size_t Overlap>
+VESSL_INLINE void spectral<T, SpectrumSize, Overlap>::frequency_band::set_complex(const complex_t& from_complex)
 {
   complex_ = from_complex;
   magnitude_ = complex_.normalize();
 }
 
-template <typename T, size_t SpectrumSize>
-VESSL_INLINE void spectral<T, SpectrumSize>::frequency_band::set_polar(T magnitude, phase_t phase)
+template <typename T, size_t SpectrumSize, size_t Overlap>
+VESSL_INLINE void spectral<T, SpectrumSize, Overlap>::frequency_band::set_polar(T magnitude, phase_t phase)
 {
   magnitude_ = magnitude;
   complex_.set_polar(1.f, phase);
 }
 
-template <typename T, size_t SpectrumSize>
-VESSL_INLINE void spectral<T, SpectrumSize>::frequency_band::set_magnitude(T magnitude)
+template <typename T, size_t SpectrumSize, size_t Overlap>
+VESSL_INLINE void spectral<T, SpectrumSize, Overlap>::frequency_band::set_magnitude(T magnitude)
 {
   magnitude_ = magnitude;
 }
 
-template <typename T, size_t SpectrumSize>
-VESSL_INLINE void spectral<T, SpectrumSize>::frequency_band::add(const frequency_band &other)
+template <typename T, size_t SpectrumSize, size_t Overlap>
+VESSL_INLINE void spectral<T, SpectrumSize, Overlap>::frequency_band::add(const frequency_band &other)
 {
   complex_t lhs = to_complex();
   complex_t rhs = other.to_complex();
@@ -248,8 +252,8 @@ VESSL_INLINE void spectral<T, SpectrumSize>::frequency_band::add(const frequency
   magnitude_ = complex_.normalize();
 }
 
-template <typename T, size_t SpectrumSize>
-void spectral<T, SpectrumSize>::frequency_band::subtract(const frequency_band &other)
+template <typename T, size_t SpectrumSize, size_t Overlap>
+void spectral<T, SpectrumSize, Overlap>::frequency_band::subtract(const frequency_band &other)
 {
   complex_t lhs = to_complex();
   complex_t rhs = other.to_complex();
@@ -258,92 +262,126 @@ void spectral<T, SpectrumSize>::frequency_band::subtract(const frequency_band &o
   magnitude_ = complex_.normalize();
 }
 
-template <typename T, size_t SpectrumSize>
-inline void spectral<T, SpectrumSize>::frequency_band::blend(const frequency_band &other, analog_t amt)
+template <typename T, size_t SpectrumSize, size_t Overlap>
+inline void spectral<T, SpectrumSize, Overlap>::frequency_band::blend(const frequency_band &other, analog_t amt)
 {
   complex_.r = vessl::math::lerp(complex_.r, other.complex_.r, amt);
   complex_.i = vessl::math::lerp(complex_.i, other.complex_.i, amt);
   magnitude_ = vessl::math::lerp(magnitude_, other.magnitude_, amt);
 }
 
-template <typename T, size_t SpectrumSize>
-spectral<T, SpectrumSize>::spectral(data &data, analog_t sample_rate)
+template <typename T, size_t SpectrumSize, size_t Overlap>
+spectral<T, SpectrumSize, Overlap>::spectral(data &data, analog_t sample_rate)
   : unit_generator<T>()
   , fft_(SpectrumSize)
   , bands_(data.bands.data(), data.bands.size())
   , spectrum_(data.spectrum.data(), data.spectrum.size())
-  , signal_a_(data.signal.data(), SpectrumSize)
-  , signal_b_(data.signal.data() + SpectrumSize, SpectrumSize)
   , window_(data.window.data(), data.window.size())
-  , read_idx_a_(SpectrumSize)
-  , read_idx_b_(SpectrumSize/2)
+  , overlap_size_(SpectrumSize/(2*Overlap))
+  , overlap_count_(overlap_size_)
+  , signal_idx_(0)
   , bin_spacing_(sample_rate/SpectrumSize)
 {
   constexpr size_t bands = SpectrumSize/2;
   VASSERT(data.bands.size() == bands, "Invalid frequency bands size");
   VASSERT(data.spectrum.size() == bands, "Invalid spectrum size");
   VASSERT(data.window.size() == SpectrumSize, "Invalid window size");
-  VASSERT(data.signal.size() == SpectrumSize*2, "Invalid signal size");
+  VASSERT(data.signal.size() == SpectrumSize*Overlap*2, "Invalid signal size");
 
   for (size_t i = 1; i < bands; ++i)
   {
     frequency_band& band = bands_[i];
     band.set_polar(0, math::random::u32()/2);
   }
-  signal_a_.fill(0);
-  signal_b_.fill(0);
+
+  data.signal.fill(0);
+  sample_t* signal_data = data.signal.data();
+  for(size_t i = 0; i < Overlap*2; ++i)
+  {
+    read_idx_[i] = overlap_size_*i;
+    signal_[i] = array<sample_t>(signal_data, SpectrumSize);
+    signal_data += SpectrumSize;
+  }
 }
 
 // for reference, see: https://dsp.stackexchange.com/questions/59519/definition-of-the-dft-fft-bin-size
-template <typename T, size_t SpectrumSize>
-VESSL_INLINE analog_t spectral<T, SpectrumSize>::get_band_frequency(size_t index) const
+template <typename T, size_t SpectrumSize, size_t Overlap>
+VESSL_INLINE analog_t spectral<T, SpectrumSize, Overlap>::get_band_frequency(size_t index) const
 {
   const analog_t k = static_cast<analog_t>(index);
   return k*bin_spacing_;
 }
 
-template <typename T, size_t SpectrumSize>
-VESSL_INLINE size_t spectral<T, SpectrumSize>::get_band_index(analog_t frequency) const
+template <typename T, size_t SpectrumSize, size_t Overlap>
+VESSL_INLINE size_t spectral<T, SpectrumSize, Overlap>::get_band_index(analog_t frequency) const
 {
   const size_t k = static_cast<size_t>(math::round(frequency/bin_spacing_));
   return k;
 }
 
-template <typename T, size_t SpectrumSize>
-VESSL_INLINE typename spectral<T, SpectrumSize>::sample_t spectral<T, SpectrumSize>::generate()
+template <typename T, size_t SpectrumSize, size_t Overlap>
+VESSL_INLINE typename spectral<T, SpectrumSize, Overlap>::sample_t 
+spectral<T, SpectrumSize, Overlap>::generate()
 {
-  if (read_idx_a_ == SpectrumSize)
-  {
-    fill_spectrum<false>();
-    fft_.inverse(spectrum_, signal_a_);
-    read_idx_a_ = 0;
-  }
+  // if (read_idx_a_ == SpectrumSize)
+  // {
+  //   fill_spectrum<false>();
+  //   fft_.inverse(spectrum_, signal_a_);
+  //   read_idx_a_ = 0;
+  // }
   
-  if (read_idx_b_ == SpectrumSize)
-  {
-    fill_spectrum<true>();
-    fft_.inverse(spectrum_, signal_b_);
-    read_idx_b_ = 0;
-  }
+  // if (read_idx_b_ == SpectrumSize)
+  // {
+  //   fill_spectrum<true>();
+  //   fft_.inverse(spectrum_, signal_b_);
+  //   read_idx_b_ = 0;
+  // }
   
+  // sample_t out = 0;
+  // out += signal_a_[read_idx_a_] * window_[read_idx_a_];
+  // ++read_idx_a_;
+  // out += signal_b_[read_idx_b_] * window_[read_idx_b_];
+  // ++read_idx_b_;
+
+  if (overlap_count_ == overlap_size_)
+  {
+    if (signal_idx_&1)
+    {
+      fill_spectrum<true>();
+    }
+    else
+    {
+      fill_spectrum<false>();
+    }
+    fft_.inverse(spectrum_, signal_[signal_idx_]);
+    read_idx_[signal_idx_] = 0;
+    
+    signal_idx_ = (signal_idx_+1)%(Overlap*2);
+    overlap_count_ = 0;
+  }
+
   sample_t out = 0;
-  out += signal_a_[read_idx_a_] * window_[read_idx_a_];
-  ++read_idx_a_;
-  out += signal_b_[read_idx_b_] * window_[read_idx_b_];
-  ++read_idx_b_;
+  for(size_t signum = 0; signum < (Overlap*2); ++signum)
+  {
+    array<sample_t> sig = signal_[signum];
+    size_t& idx = read_idx_[signum];
+    out += sig[idx] * window_[idx];
+    idx = (idx+1)&(SpectrumSize-1);
+  }
+  ++overlap_count_;
   
   return out;
 }
 
-template <typename T, size_t SpectrumSize>
-VESSL_INLINE size_t spectral<T, SpectrumSize>::get_read_head(size_t idx) const
+template <typename T, size_t SpectrumSize, size_t Overlap>
+VESSL_INLINE size_t spectral<T, SpectrumSize, Overlap>::get_read_head(size_t idx) const
 {
-  return idx == 0 ? read_idx_a_ : read_idx_b_;
+  return read_idx_[idx];
 }
 
-template <typename T, size_t SpectrumSize>
+template <typename T, size_t SpectrumSize, size_t Overlap>
 template<bool ShiftOddPhases>
-VESSL_INLINE void spectral<T, SpectrumSize>::fill_spectrum()
+VESSL_INLINE void spectral<T, SpectrumSize, Overlap>::fill_spectrum()
 {
   // gained a better understanding of glitching.
   // it stems from generating complex numbers for spectrum_

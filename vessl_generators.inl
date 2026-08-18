@@ -259,6 +259,14 @@ void spectral<T, SpectrumSize>::frequency_band::subtract(const frequency_band &o
 }
 
 template <typename T, size_t SpectrumSize>
+inline void spectral<T, SpectrumSize>::frequency_band::blend(const frequency_band &other, analog_t amt)
+{
+  complex_.r = vessl::math::lerp(complex_.r, other.complex_.r, amt);
+  complex_.i = vessl::math::lerp(complex_.i, other.complex_.i, amt);
+  magnitude_ = vessl::math::lerp(magnitude_, other.magnitude_, amt);
+}
+
+template <typename T, size_t SpectrumSize>
 spectral<T, SpectrumSize>::spectral(data &data, analog_t sample_rate)
   : unit_generator<T>()
   , fft_(SpectrumSize)

@@ -421,6 +421,7 @@ public:
     void add(const frequency_band& other);
     void subtract(const frequency_band& other);
     VESSL_INLINE void scale(T scalar) { magnitude_ *= scalar; }
+    void blend(const frequency_band& other, analog_t amt);
   };
   
   // data.frequencies must have length equal to SpectrumSize/2

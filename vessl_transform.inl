@@ -78,6 +78,12 @@ VESSL_INLINE T transform::complex<T>::magnitude() const
 }
 
 template <typename T>
+VESSL_INLINE T transform::complex<T>::magnitude_sqr() const 
+{ 
+  return r*r + i*i; 
+}
+
+template <typename T>
 phase_t transform::complex<T>::phase() const
 {
   T phase_rad = math::atan2<T>(i, r);

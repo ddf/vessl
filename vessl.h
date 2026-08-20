@@ -1141,6 +1141,7 @@ namespace transform
     T normalize();
     
     T magnitude() const;
+    T magnitude_sqr() const;
     phase_t phase() const;
     
     complex& scale(T scalar);

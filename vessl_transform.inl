@@ -61,13 +61,11 @@ VESSL_INLINE void transform::complex<T>::set_polar(T magnitude, T angle)
 template<typename T>
 VESSL_INLINE T transform::complex<T>::normalize()
 {
-  T msqr = r*r + i*i;
-  T m = msqr > 0 ? math::sqrt(msqr) : 0;
-  if (m > 0)
-  {
-    r /= m;
-    i /= m;
-  }
+  static constexpr T one = cast<T>(1);
+  T m = math::sqrt(r*r + i*i);
+  T d = m > math::epsilon<T>() ? one / m : one;
+  r *= d;
+  i *= d;
   return m;
 }
 

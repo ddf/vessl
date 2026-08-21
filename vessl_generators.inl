@@ -253,7 +253,7 @@ VESSL_INLINE void spectral<T, SpectrumSize, Overlap>::frequency_band::add(const 
 }
 
 template <typename T, size_t SpectrumSize, size_t Overlap>
-void spectral<T, SpectrumSize, Overlap>::frequency_band::subtract(const frequency_band &other)
+VESSL_INLINE void spectral<T, SpectrumSize, Overlap>::frequency_band::subtract(const frequency_band &other)
 {
   complex_t lhs = to_complex();
   complex_t rhs = other.to_complex();
@@ -263,7 +263,7 @@ void spectral<T, SpectrumSize, Overlap>::frequency_band::subtract(const frequenc
 }
 
 template <typename T, size_t SpectrumSize, size_t Overlap>
-inline void spectral<T, SpectrumSize, Overlap>::frequency_band::blend(const frequency_band &other, analog_t amt)
+VESSL_INLINE void spectral<T, SpectrumSize, Overlap>::frequency_band::blend(const frequency_band &other, analog_t amt)
 {
   complex_.r = vessl::math::lerp(complex_.r, other.complex_.r, amt);
   complex_.i = vessl::math::lerp(complex_.i, other.complex_.i, amt);
@@ -373,6 +373,31 @@ spectral<T, SpectrumSize, Overlap>::generate()
   return out;
 }
 
+
+template <typename T, size_t SpectrumSize, size_t Overlap>
+template <bool FlipOddPhases>
+VESSL_INLINE void spectral<T, SpectrumSize, Overlap>::generate(array<T> out)
+{
+  fill_spectrum<FlipOddPhases>();
+  fft_.inverse(spectrum_, signal_[signal_idx_]);
+  read_idx_[signal_idx_] = 0;  
+  signal_idx_ = (signal_idx_+1)&(signal_count-1);
+
+  auto writer = out.make_writer();
+  while(writer)
+  {
+    sample_t out = 0;
+    for(size_t signum = 0; signum < signal_count; ++signum)
+    {
+      array<sample_t> sig = signal_[signum];
+      size_t& idx = read_idx_[signum];
+      out += sig[idx] * window_[idx];
+      idx = (idx+1)&(SpectrumSize-1);
+    }
+    writer << out;
+  }
+}
+
 template <typename T, size_t SpectrumSize, size_t Overlap>
 VESSL_INLINE size_t spectral<T, SpectrumSize, Overlap>::get_read_head(size_t idx) const
 {
@@ -380,7 +405,7 @@ VESSL_INLINE size_t spectral<T, SpectrumSize, Overlap>::get_read_head(size_t idx
 }
 
 template <typename T, size_t SpectrumSize, size_t Overlap>
-template<bool ShiftOddPhases>
+template <bool ShiftOddPhases>
 VESSL_INLINE void spectral<T, SpectrumSize, Overlap>::fill_spectrum()
 {
   // gained a better understanding of glitching.

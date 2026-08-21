@@ -399,6 +399,12 @@ public:
   using fft_t = transform::fft<T>;
   using sample_t = T;
   using complex_t = transform::complex<T>;
+
+  static constexpr size_t signal_count = 2*Overlap;
+
+  // if calling the version of generate with arrays,
+  // the input and output arrays must be exactly this size.
+  static constexpr size_t generate_block_size = SpectrumSize/signal_count;
   
   class frequency_band
   {
@@ -447,6 +453,9 @@ public:
   [[nodiscard]] size_t get_band_index(analog_t frequency) const;
   
   sample_t generate() override;
+
+  template<bool FlipOddPhases>
+  void generate(array<T> out);
   
   size_t get_read_head(size_t idx) const;
   size_t get_overlap_count() const { return overlap_count_; }
@@ -459,9 +468,9 @@ protected:
   fft_t fft_;
   array<frequency_band> bands_;
   array<complex_t> spectrum_;
-  array<sample_t> signal_[Overlap*2];
+  array<sample_t> signal_[signal_count];
   array<sample_t> window_;
-  size_t read_idx_[Overlap*2];
+  size_t read_idx_[signal_count];
   size_t overlap_size_;
   size_t overlap_count_;
   size_t signal_idx_;

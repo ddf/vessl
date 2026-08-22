@@ -401,10 +401,6 @@ public:
   using complex_t = transform::complex<T>;
 
   static constexpr size_t signal_count = 2*Overlap;
-
-  // if calling the version of generate with arrays,
-  // the input and output arrays must be exactly this size.
-  static constexpr size_t generate_block_size = SpectrumSize/signal_count;
   
   class frequency_band
   {
@@ -455,6 +451,10 @@ public:
   
   sample_t generate() override;
 
+  /** @todo
+   *  change declaration to take a reference to a fixed-size array of generate_block_size
+   */
+  static constexpr size_t generate_block_size = SpectrumSize/signal_count;
   template<bool FlipOddPhases>
   void generate(array<T> out);
   
@@ -462,7 +462,7 @@ public:
   size_t get_overlap_count() const { return overlap_count_; }
 
 protected:
-  // set contents of spectrum_ based on contents of frequencies_
+  // set contents of spectrum_ based on contents of bands_
   template<bool ShiftOddPhases>
   void fill_spectrum();
   

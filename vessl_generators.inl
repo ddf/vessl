@@ -354,6 +354,7 @@ spectral<T, SpectrumSize, Overlap>::generate()
       fill_spectrum<false>();
     }
     fft_.inverse(spectrum_, signal_[signal_idx_]);
+    signal_[signal_idx_].multiply(window_);
     read_idx_[signal_idx_] = 0;
     
     signal_idx_ = (signal_idx_+1)%(Overlap*2);
@@ -361,11 +362,11 @@ spectral<T, SpectrumSize, Overlap>::generate()
   }
 
   sample_t out = 0;
-  for(size_t signum = 0; signum < (Overlap*2); ++signum)
+  for(size_t signum = 0; signum < signal_count; ++signum)
   {
     array<sample_t> sig = signal_[signum];
     size_t& idx = read_idx_[signum];
-    out += sig[idx] * window_[idx];
+    out += sig[idx];
     idx = (idx+1)&(SpectrumSize-1);
   }
   ++overlap_count_;
@@ -380,21 +381,18 @@ VESSL_INLINE void spectral<T, SpectrumSize, Overlap>::generate(array<T> out)
 {
   fill_spectrum<FlipOddPhases>();
   fft_.inverse(spectrum_, signal_[signal_idx_]);
+  signal_[signal_idx_].multiply(window_);
   read_idx_[signal_idx_] = 0;  
   signal_idx_ = (signal_idx_+1)&(signal_count-1);
 
-  auto writer = out.make_writer();
-  while(writer)
+  out.fill(0);
+  const size_t block_size = out.size();
+  for(size_t signum = 0; signum < signal_count; ++signum)
   {
-    sample_t out = 0;
-    for(size_t signum = 0; signum < signal_count; ++signum)
-    {
-      array<sample_t> sig = signal_[signum];
-      size_t& idx = read_idx_[signum];
-      out += sig[idx] * window_[idx];
-      idx = (idx+1)&(SpectrumSize-1);
-    }
-    writer << out;
+    size_t& idx = read_idx_[signum];
+    array<sample_t> sig(signal_[signum].data() + idx, block_size);
+    out.add(sig);
+    idx = (idx+block_size)&(SpectrumSize-1);
   }
 }
 

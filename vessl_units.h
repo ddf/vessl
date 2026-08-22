@@ -451,6 +451,7 @@ public:
   [[nodiscard]] analog_t get_band_frequency(size_t index) const;
   // get the index of the band that frequency falls within.
   [[nodiscard]] size_t get_band_index(analog_t frequency) const;
+  [[nodiscard]] VESSL_INLINE size_t get_band_count() const { return bands_.size(); }
   
   sample_t generate() override;
 

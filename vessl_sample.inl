@@ -1,3 +1,4 @@
+#include "vessl.h"
 #pragma once
 
 namespace vessl
@@ -565,7 +566,13 @@ VESSL_INLINE void vessl::sample::windows::render(type window_type, array<T> outp
   }
 }
 
-template <typename T>
+template <typename T> 
+VESSL_INLINE void vessl::sample::windows::render(type window_type, T* output, size_t output_size) 
+{
+  render(window_type, array<T>(output, output_size));
+}
+
+template <typename T> 
 VESSL_INLINE void vessl::sample::waveform<T>::render(array<T> output) const
 {
   phase_t phase = 0;

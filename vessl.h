@@ -826,6 +826,9 @@ enum class type : uint8_t
 
 template<typename T>
 void render(type window_type, array<T> output);
+
+template<typename T>
+void render(type window_type, T* output, size_t output_size);
 }
 
 namespace interpolation

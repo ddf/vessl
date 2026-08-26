@@ -282,7 +282,7 @@ spectral<T, SpectrumSize, Overlap>::spectral(data &data, analog_t sample_rate)
   , read_idx_(0)
   , overlap_count_(block_size) // will trigger generation immediately the first time generate() is called
   , bin_spacing_(sample_rate/SpectrumSize)
-  , phase_flip_(false)
+  , phase_flip_(0)
 {
   constexpr size_t band_count = SpectrumSize/2;
   VASSERT(data.bands.size() == band_count, "Invalid frequency bands size");
@@ -403,23 +403,12 @@ VESSL_INLINE void spectral<T, SpectrumSize, Overlap>::fill_spectrum()
   {
     const frequency_band& band = bands_[i];
     T m = band.magnitude() > mag_min ? band.magnitude() * mag_scale : mag_zero;
-    T s = 1 - 2*((i&1)&phase_flip_);
+    // this results in really beautiful noise because the right side is calculated as unsigned and wraps around.
+    // T s = 1 - 2*((i&1)&phase_flip_);
+    // this forces conversion of the 0/1 bit math result.
+    T s = 1.0 - 2.0*((i&1)&phase_flip_);
     complex_t cmplx = band.to_complex();
     cmplx.scale(s*m);
-    // //if (m > mag_zero)
-    // {
-    //   if constexpr (FlipOddPhases)
-    //   {
-    //     T s = i&1 ? -1 : 1;
-    //     cmplx = band.to_complex();
-    //     cmplx.scale(s*m);
-    //   }
-    //   else
-    //   {
-    //     cmplx = band.to_complex();
-    //     cmplx.scale(m);
-    //   }
-    // }
     spectrum_[i] = cmplx;
   }
   phase_flip_ = 1 - phase_flip_;

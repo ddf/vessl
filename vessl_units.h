@@ -644,7 +644,12 @@ template<typename T>
 class limiter : public peak_meter<T>
 {
 public:
-  explicit limiter(gain_t pre_gain = gain_t::from_decibels(0))
+  limiter()
+  {
+    params_.pre_gain.value = gain_t::from_decibels(0);
+  }
+  
+  explicit limiter(gain_t pre_gain)
   {
     params_.pre_gain.value = pre_gain;
   }

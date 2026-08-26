@@ -396,11 +396,12 @@ template<typename T, size_t SpectrumSize, size_t Overlap = 1>
 class spectral : public unit_generator<T>, plist<0>
 {
 public:
+  // a time-domain signal is synthesized and overlap-added to our output every block_size samples.
+  static constexpr size_t block_size = SpectrumSize/(2*Overlap);
+  
   using fft_t = transform::fft<T>;
   using sample_t = T;
   using complex_t = transform::complex<T>;
-
-  static constexpr size_t signal_count = 2*Overlap;
   
   class frequency_band
   {
@@ -427,16 +428,18 @@ public:
     void blend(const frequency_band& other, analog_t amt);
   };
   
-  // data.frequencies must have length equal to SpectrumSize/2
-  // data.spectrum must have a length equal to SpectrumSize/2
-  // data.signal must have a length equal to SpectrumSize*Overlap*2
-  // data.window must have a length equal to SpectrumSize
+  // data.frequencies must have length equal to SpectrumSize/2, must be unique to this instance.
+  // data.spectrum must have a length equal to SpectrumSize/2, can be shared by instances.
+  // data.signal must have a length equal to SpectrumSize, can be shared by instances.
+  // data.window must have a length equal to SpectrumSize, can be shared by instances.
+  // data.output must have a length equal to SpectrumSize, must be unique to this instance.
   struct data
   {
     array<frequency_band> bands;
     array<complex_t> spectrum;
     array<sample_t> signal;
     array<sample_t> window;
+    array<sample_t> output;
   };
   
   spectral(data& data, analog_t sample_rate);
@@ -452,10 +455,8 @@ public:
   sample_t generate() override;
 
   /** @todo
-   *  change declaration to take a reference to a fixed-size array of generate_block_size
+   *  change declaration to take a reference to a fixed-size array of block_size
    */
-  static constexpr size_t generate_block_size = SpectrumSize/signal_count;
-  template<bool FlipOddPhases>
   void generate(array<T> out);
   
   size_t get_read_head(size_t idx) const;
@@ -463,19 +464,19 @@ public:
 
 protected:
   // set contents of spectrum_ based on contents of bands_
-  template<bool ShiftOddPhases>
   void fill_spectrum();
+  void overlap_add();
   
   fft_t fft_;
   array<frequency_band> bands_;
   array<complex_t> spectrum_;
-  array<sample_t> signal_[signal_count];
   array<sample_t> window_;
-  size_t read_idx_[signal_count];
-  size_t overlap_size_;
-  size_t overlap_count_;
-  size_t signal_idx_;
+  array<sample_t> signal_;
+  array<sample_t> output_;
+  size_t read_idx_; // index into output_
+  size_t overlap_count_; // count up to block_size, then generate new SpectrumSize time-domain signal.
   analog_t bin_spacing_;
+  uint8_t  phase_flip_; // toggled fill_spectrum to keep track of when to flip phases of odd bands.
 };
 
 } // namespace generators

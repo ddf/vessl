@@ -383,26 +383,13 @@ VESSL_INLINE size_t spectral<T, SpectrumSize, Overlap>::get_read_head(size_t idx
 template <typename T, size_t SpectrumSize, size_t Overlap>
 VESSL_INLINE void spectral<T, SpectrumSize, Overlap>::fill_spectrum()
 {
-  // gained a better understanding of glitching.
-  // it stems from generating complex numbers for spectrum_
-  // from band magnitudes that are "too small,"
-  // which I think is relative to SpectrumSize.
-  // magnitude needs to be scaled up for a band quite a bit when setting it externally
-  // in order to generate a time-domain signal that is at the level I expect.
-  // experiment with where this amplification occurs.
-  // is it better applied here, or after generation of a time-domain frame?
-  // users of this class should be able to set a [0,1] magnitude in a band
-  // and get comparably leveled audio at the output.
-  static constexpr T mag_zero  = cast<T>(0);
-  static constexpr T mag_min   = cast<T>(1.f/SpectrumSize);
-  static constexpr T mag_scale = cast<T>(static_cast<analog_t>(SpectrumSize)/32.f);
-  // DC component
+  // DC component and Nyquist frequency
   spectrum_[0].set_complex(0,0);
   const size_t max_band = spectrum_.size() - 1;
   for (size_t i = 1; i < max_band; ++i)
   {
     const frequency_band& band = bands_[i];
-    T m = band.magnitude() > mag_min ? band.magnitude() * mag_scale : mag_zero;
+    const T m = band.magnitude();
     // this results in really beautiful noise because the right side is calculated as unsigned and wraps around.
     // T s = 1 - 2*((i&1)&phase_flip_);
     // this forces conversion of the 0/1 bit math result.

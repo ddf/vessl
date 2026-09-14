@@ -161,14 +161,15 @@ VESSL_INLINE frequency<T> frequency<T>::of_hertz(analog_t hz, analog_t sample_ra
   return frequency(cast<T>(hz / sample_rate));
 }
 
-#define HZA4       440.0f
-#define MIDIA4     69.0f
-#define MIDIOCTAVE 12.0f
+VESSL_INLINE analog_t midi_note_to_hertz(analog_t midi_note_number)
+{
+  return frequency<analog_t>::HZA4 * math::pow(2.0f, (math::constrain(midi_note_number, 0.f, 127.f) - frequency<analog_t>::MIDIA4) / frequency<analog_t>::MIDIOCTAVE);
+}
 
 template <typename T>
 VESSL_INLINE frequency<T> frequency<T>::of_midi_note(analog_t midi_note_number, analog_t sample_rate)
 {
-  analog_t hz = HZA4 * math::pow(2.0f, (midi_note_number - MIDIA4) / MIDIOCTAVE);
+  analog_t hz = midi_note_to_hertz(midi_note_number);
   return frequency(cast<T>(hz / sample_rate));
 }
 

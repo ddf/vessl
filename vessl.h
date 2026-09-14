@@ -92,10 +92,14 @@ static constexpr phase_t phase_zero = 0UL;
 template<typename T>
 struct frequency
 {
+  static constexpr analog_t HZA4 = 440.0f;
+  static constexpr analog_t MIDIA4 = 69.0f;
+  static constexpr analog_t MIDIOCTAVE = 12.0f;
+
   // normalized representation, allows for representing frequency with q31.
   T norm;
   
-  explicit constexpr  frequency(T normalized) : norm(normalized) {}
+  explicit constexpr frequency(T normalized) : norm(normalized) {}
   
   static frequency of_hertz(analog_t hz, analog_t sample_rate);
   static frequency of_midi_note(analog_t midi_note_number, analog_t sample_rate);
@@ -103,6 +107,9 @@ struct frequency
   analog_t as_midi_note(analog_t sample_rate) const;
   analog_t as_hertz(analog_t sample_rate) const;
 };
+
+// midi_note_number will be clamped to [0,127]
+VESSL_INLINE analog_t midi_note_to_hertz(analog_t midi_note_number);
 
 // we use this in place of static_cast throughout the library for non-pointer types
 // so that we can specialize conversions between some of our value types (e.g. phase_t <--> analog_t)

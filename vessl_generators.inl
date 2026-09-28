@@ -194,52 +194,50 @@ VESSL_INLINE parameter clock<T>::element_at(size_t index) const
 //
 template <typename T, size_t SpectrumSize, size_t Overlap>
 constexpr spectral<T, SpectrumSize, Overlap>::frequency_band::frequency_band(T magnitude, phase_t phase)
-: magnitude_(magnitude)
+: r_(math::cos<T>(phase)), i_(math::sin<T>(phase)), m_(magnitude)
 {
-  complex_.set_polar(1.f, phase);
-}
-
-template <typename T, size_t SpectrumSize, size_t Overlap>
-VESSL_INLINE typename spectral<T, SpectrumSize, Overlap>::frequency_band& 
-spectral<T, SpectrumSize, Overlap>::frequency_band::operator=(const frequency_band &other)
-{
-  if (this == &other)
-  {
-    return *this;
-  }
-  
-  complex_ = other.complex_;
-  magnitude_ = other.magnitude_;
-  return *this;
+  //complex_.set_polar(1.f, phase);
 }
 
 template <typename T, size_t SpectrumSize, size_t Overlap>
 VESSL_INLINE typename spectral<T, SpectrumSize, Overlap>::complex_t 
 spectral<T, SpectrumSize, Overlap>::frequency_band::to_complex() const
 {
-  complex_t ret(complex_);
-  ret.scale(magnitude_);
-  return ret;
+  return { r_*m_, i_*m_ };
 }
 
 template <typename T, size_t SpectrumSize, size_t Overlap>
 VESSL_INLINE void spectral<T, SpectrumSize, Overlap>::frequency_band::set_complex(const complex_t& from_complex)
 {
-  complex_ = from_complex;
-  magnitude_ = complex_.normalize();
+  m_ = from_complex.magnitude();
+  r_ = m_ > math::epsilon<T>() ? from_complex.r / m_ : from_complex.r;
+  i_ = m_ > math::epsilon<T>() ? from_complex.i / m_ : from_complex.i; 
 }
 
 template <typename T, size_t SpectrumSize, size_t Overlap>
 VESSL_INLINE void spectral<T, SpectrumSize, Overlap>::frequency_band::set_polar(T magnitude, phase_t phase)
 {
-  magnitude_ = magnitude;
-  complex_.set_polar(1.f, phase);
+  m_ = magnitude;
+  r_ = math::cos<T>(phase);
+  i_ = math::sin<T>(phase);
 }
 
 template <typename T, size_t SpectrumSize, size_t Overlap>
 VESSL_INLINE void spectral<T, SpectrumSize, Overlap>::frequency_band::set_magnitude(T magnitude)
 {
-  magnitude_ = magnitude;
+  m_ = magnitude;
+}
+
+template <typename T, size_t SpectrumSize, size_t Overlap>
+VESSL_INLINE T spectral<T, SpectrumSize, Overlap>::frequency_band::magnitude() const
+{
+  return m_;
+}
+
+template <typename T, size_t SpectrumSize, size_t Overlap>
+VESSL_INLINE phase_t spectral<T, SpectrumSize, Overlap>::frequency_band::phase() const
+{
+  return to_complex().phase();
 }
 
 template <typename T, size_t SpectrumSize, size_t Overlap>
@@ -247,9 +245,11 @@ VESSL_INLINE void spectral<T, SpectrumSize, Overlap>::frequency_band::add(const 
 {
   complex_t lhs = to_complex();
   complex_t rhs = other.to_complex();
-  complex_.r = lhs.r + rhs.r;
-  complex_.i = lhs.r + rhs.r;
-  magnitude_ = complex_.normalize();
+  lhs.r += rhs.r;
+  lhs.i += rhs.i;
+  m_ = lhs.normalize();
+  r_ = lhs.r;
+  i_ = lhs.i;
 }
 
 template <typename T, size_t SpectrumSize, size_t Overlap>
@@ -257,17 +257,25 @@ VESSL_INLINE void spectral<T, SpectrumSize, Overlap>::frequency_band::subtract(c
 {
   complex_t lhs = to_complex();
   complex_t rhs = other.to_complex();
-  complex_.r = lhs.r - rhs.r;
-  complex_.i = lhs.r - rhs.r;
-  magnitude_ = complex_.normalize();
+  lhs.r -= rhs.r;
+  lhs.i -= rhs.i;
+  m_ = lhs.normalize();
+  r_ = lhs.r;
+  i_ = lhs.i;
+}
+
+template <typename T, size_t SpectrumSize, size_t Overlap>
+VESSL_INLINE void spectral<T, SpectrumSize, Overlap>::frequency_band::scale(T scalar)
+{
+  m_ *= scalar;
 }
 
 template <typename T, size_t SpectrumSize, size_t Overlap>
 VESSL_INLINE void spectral<T, SpectrumSize, Overlap>::frequency_band::blend(const frequency_band &other, analog_t amt)
 {
-  complex_.r = vessl::math::lerp(complex_.r, other.complex_.r, amt);
-  complex_.i = vessl::math::lerp(complex_.i, other.complex_.i, amt);
-  magnitude_ = vessl::math::lerp(magnitude_, other.magnitude_, amt);
+  r_ = vessl::math::lerp(r_, other.r_, amt);
+  i_ = vessl::math::lerp(i_, other.i_, amt);
+  m_ = vessl::math::lerp(m_, other.m_, amt);
 }
 
 template <typename T, size_t SpectrumSize, size_t Overlap>

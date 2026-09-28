@@ -403,15 +403,15 @@ public:
   using sample_t = T;
   using complex_t = transform::complex<T>;
   
+  // complex number stored as normalized real and imaginary parts with magnitude.
   class frequency_band
   {
-    complex_t complex_;
-    T magnitude_;
+    T r_, i_, m_;
   public:
     constexpr frequency_band() = default;
     constexpr frequency_band(T magnitude, phase_t phase);
     
-    frequency_band& operator=(const frequency_band& other);
+    frequency_band& operator=(const frequency_band& other) = default;
 
     complex_t to_complex() const;
     
@@ -419,12 +419,12 @@ public:
     void set_polar(T magnitude, phase_t phase);
     void set_magnitude(T magnitude);
     
-    VESSL_INLINE T magnitude() const { return magnitude_; }
-    VESSL_INLINE phase_t phase() const { return complex_.phase(); }
+    T magnitude() const;
+    VESSL_INLINE phase_t phase() const;
     
     void add(const frequency_band& other);
     void subtract(const frequency_band& other);
-    VESSL_INLINE void scale(T scalar) { magnitude_ *= scalar; }
+    void scale(T scalar);
     void blend(const frequency_band& other, analog_t amt);
   };
   

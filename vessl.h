@@ -51,8 +51,16 @@
 #undef cos
 #endif
 
+#ifdef exp
+#undef exp
+#endif
+
 #ifdef exp10
 #undef exp10
+#endif
+
+#ifdef log
+#undef log
 #endif
 
 #ifdef round

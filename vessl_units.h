@@ -77,7 +77,11 @@ public:
 
   binary_t is_active() const { return !params_.eor.value; }
   void trigger();
+
   T generate() override;
+  
+  template<typename E>
+  T generate();
     
 protected:
   parameter element_at(size_t index) const override

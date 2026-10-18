@@ -43,6 +43,7 @@ VESSL_INLINE void ramp<T>::trigger()
 }
 
 template<typename T>
+template<typename E>
 VESSL_INLINE T ramp<T>::generate()
 {
   analog_t lt = t_;
@@ -55,7 +56,13 @@ VESSL_INLINE T ramp<T>::generate()
       params_.eor.value = true;
     }
   }
-  return math::lerp(params_.from.value, params_.to.value, lt);
+  return math::interp<E>(params_.from.value, params_.to.value, lt);
+}
+
+template<typename T>
+VESSL_INLINE T ramp<T>::generate()
+{
+  return generate<math::easing::linear>();
 }
 
 template<typename T>

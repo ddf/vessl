@@ -1518,7 +1518,9 @@ public:
     I input;
       
     sample(processor& processor, I sample_in) : proc(&processor), input(sample_in) {}
-    I& operator>>(O& out) { out = proc->process(input); return out; }
+    O& operator>>(O& out) { out = proc->process(input); return out; }
+    sample& operator>>(processor& next) { input = proc->process(input); proc = &next; return *this; }
+    operator O() { return proc->process(input); }
   };
     
   struct block
@@ -1563,9 +1565,9 @@ typename processor<I,O>::block operator>>(array<I> in, processor<I,O>& proc)
 }
 
 template<typename I, typename O>
-typename processor<I,O>::block operator>>(const I& in, processor<I,O>& proc)
+typename processor<I,O>::sample operator>>(const I& in, processor<I,O>& proc)
 {
-  return typename processor<I,O>::block(proc, sample::frame<I,1>(in));
+  return typename processor<I,O>::sample(proc, in);
 }
 
 template<typename I, typename O>

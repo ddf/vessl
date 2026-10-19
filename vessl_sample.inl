@@ -829,7 +829,10 @@ VESSL_INLINE T delay_line<T>::readf(analog_t sample_delay) const
   const size_t lidx = static_cast<size_t>(idx);
   const size_t hidx = (lidx+1) % sz;
   const analog_t t = idx - lidx;
-  return math::lerp(data()[lidx], data()[hidx], t);
+  const T& lo = data()[lidx];
+  const T& hi = data()[hidx];
+  return lo + (hi-lo)*t;
+  //return math::lerp(data()[lidx], data()[hidx], t);
 }
 
 template<typename T>

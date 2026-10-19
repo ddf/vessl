@@ -1,5 +1,7 @@
 #pragma once
 
+#include "vessl.h"
+
 #ifdef ARM_CORTEX
 #include "vessl_arm_math.inl"
 #endif
@@ -265,7 +267,8 @@ struct lerper
 {
   VESSL_INLINE T operator()(T begin, T end, D t)
   {
-    return interp<easing::linear>(begin, end, t);
+    t = clamp_delta(t);
+    return (end-begin) * t + begin;
   }
 };
 

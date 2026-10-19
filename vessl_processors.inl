@@ -298,17 +298,17 @@ VESSL_INLINE void filter<T, H>::process(array<T> in, array<T> out)
 template<typename T, uint32_t MaxBits>
 VESSL_INLINE T bitcrush<T, MaxBits>::process(const T& in)
 {
-  rate_alpha_ += math::max<analog_t>(1.0, cast<analog_t>(rate()))*dt_;
+  rate_alpha_ += math::max<analog_t>(1.0, params_.bitRate.value)*dt_;
   if (rate_alpha_ >= 1)
   {
     rate_alpha_ -= 1;
     curr_sample_ = math::lerp(prev_input_, in, rate_alpha_);
   }
 
-  analog_t bd = math::constrain<analog_t>(cast<analog_t>(depth()), 2.0, MaxBits);
-  analog_t scalar = math::pow<analog_t>(2.0, bd) - 1;
+  analog_t bd = math::constrain<analog_t>(params_.bitDepth.value, 2.0, MaxBits);
+  analog_t scalar = math::exp2(bd) - 1.f; // math::exp2<analog_t>(bd) - 1;
   T val = math::round(curr_sample_*scalar);
-  if (mangle())
+  if (params_.mangle.value)
   {
     val = math::xore(val, math::round(prev_input_*scalar));
   }

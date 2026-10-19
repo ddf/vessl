@@ -1,5 +1,7 @@
 #pragma once
 
+#include "vessl_units.h"
+
 namespace vessl
 {
 namespace processors
@@ -147,7 +149,9 @@ VESSL_INLINE T freeze<T>::generate()
   freeze_delay_ = cast<analog_t>(position());
   freeze_size_  = params_.duration.value.samples;
   analog_t sampleDelay = freeze_delay_ + (1.0-phase_)*freeze_size_;
-  phase_ = math::wrap01(phase_ + rate() / freeze_size_);
+  analog_t phase = phase_ + rate() / freeze_size_;
+  phase_ = math::wrap01(phase);
+  looped_ = phase > 1.0f;
   return delay_line_.readf(sampleDelay);
 }
 
@@ -160,6 +164,7 @@ VESSL_INLINE T freeze<T>::process(const T& in)
   T wet = generate();
   if (!is_enabled)
   {
+    looped_ = false;
     delay_line_.write(in);
   }
   return wet_level*wet + (1.0 - wet_level)*in;

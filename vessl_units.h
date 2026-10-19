@@ -723,10 +723,12 @@ public:
   parameter duration() const { return params_.duration("duration", 'd'); }
   // rate of playback when enabled, can be negative to play in reverse
   parameter rate() const { return params_.rate("rate", 'r'); }
+  // if true after a call to generate or process, it means the we looped back to the beginning of the buffer
+  VESSL_INLINE binary_t looped() const { return looped_; }
   // should this be a parameter? there's not much gained by it.
-  analog_t phase() const { return phase_; }
+  VESSL_INLINE analog_t phase() const { return phase_; }
   // reset the phase to zero (argument for making it a parameter?)
-  void reset() { phase_ = 0; }
+  VESSL_INLINE void reset() { phase_ = 0; }
 
   T generate() override;
 
@@ -761,6 +763,7 @@ private:
   } params_;
     
   sample::delay_line<T> delay_line_;
+  binary_t looped_ = false;
   analog_t phase_;
   // used to crossfade between the incoming signal and the freeze signal when enabled changes.
   math::easing::smoother<analog_t> crossfade_;

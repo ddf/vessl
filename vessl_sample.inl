@@ -114,7 +114,7 @@ VESSL_INLINE constexpr frame<T, N> operator^(frame<T, N> lhs, const frame<T,N>& 
   frame<T, N> result;
   for (size_t i = 0; i < N; ++i)
   {
-    result[i] = cast<digital_t>(lhs[i]) ^ cast<digital_t>(rhs[i]);
+    result[i] = math::xore(lhs.samples[i], rhs.samples[i]);
   }
   return result;
 }
@@ -196,7 +196,7 @@ struct frame<T, 1>
   
   VESSL_INLINE frame& operator^=(const frame& rhs)
   {
-    samples[0] ^= rhs.samples[0];
+    samples[0] = math::xore(samples[0], rhs.samples[0]);
     return *this;
   }
   
@@ -227,7 +227,7 @@ struct frame<T, 1>
   
   VESSL_INLINE friend constexpr frame operator^(frame lhs, const frame& rhs)
   {
-    return frame(lhs.value() ^ rhs.value());
+    return frame(math::xore(lhs.value(), rhs.value()));
   }
 };
 
@@ -416,7 +416,11 @@ struct frame<T, 3>
   
   friend constexpr frame operator^(frame lhs, const frame& rhs)
   {
-    return {lhs.left() ^ rhs.left(), lhs.center() ^ rhs.center(), lhs.right() ^ rhs.right()};
+    return { 
+      math::xore(lhs.left(), rhs.left()), 
+      math::xore(lhs.center(), rhs.center()),
+      math::xore(lhs.right(), rhs.right())
+    };
   }
 };
 } // namespace frame

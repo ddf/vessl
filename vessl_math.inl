@@ -118,12 +118,6 @@ VESSL_INLINE sample::frame<T, N> round(sample::frame<T, N> x)
   return result;
 }
 
-template<>
-VESSL_INLINE analog_t xore(const analog_t& a, const analog_t& b)
-{
-  return xore(cast<digital_t>(a), cast<digital_t>(b));
-}
-
 namespace random
 {
 VESSL_INLINE uint32_t u32()
@@ -305,6 +299,18 @@ VESSL_INLINE T wrap(T val, T low, T high)
   while (val < low) { val += diff; }
   while (val > high) { val -= diff; }
   return val; 
+}
+
+template<typename T> 
+VESSL_INLINE T xore(const T &a, const T &b) 
+{ 
+  return a ^ b;
+}
+
+template<>
+VESSL_INLINE analog_t xore<analog_t>(const analog_t& a, const analog_t& b)
+{
+  return cast<analog_t>(cast<q31_t>(a) ^ cast<q31_t>(b));
 }
 
 template<>

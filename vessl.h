@@ -516,7 +516,7 @@ VESSL_INLINE binary_t is_nan(T n) { return isnan(n); }
       
 // xore because xor is a keyword
 template<typename T>
-VESSL_INLINE T xore(const T& a, const T& b) { return a ^ b; }
+VESSL_INLINE T xore(const T& a, const T& b);
 
 namespace elc
 {

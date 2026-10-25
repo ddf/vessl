@@ -1,8 +1,8 @@
 #pragma once
 
 #include "vessl_core.inl"
-#include "vessl_math.inl"
 #include "vessl_qmath.inl"
+#include "vessl_math.inl"
 #include "vessl_noise.inl"
 #include "vessl_sample.inl"
 #include "vessl_filtering.inl"

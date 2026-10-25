@@ -27,6 +27,7 @@ SOFTWARE.
 #pragma once
 
 #include <cstdint>
+#include "vessl.h"
 
 // Fixed-point types in struct form based on the qmath types in Bastl Instrument's Kastle2 framework.
 namespace vessl

@@ -126,11 +126,35 @@ VESSL_INLINE uint32_t u32()
   return ru32_seed;
 }
 
-template<typename T>
-VESSL_INLINE T range(T low, T high)
+template <typename T> 
+VESSL_INLINE T unit() 
+{ 
+  return range(T(0.f), T(1.f));
+}
+
+template<>
+VESSL_INLINE analog_t unit<analog_t>()
 {
   static constexpr analog_t scale = 1/4294967296.0;
-  analog_t r = static_cast<analog_t>(u32()) * scale;
+  return static_cast<analog_t>(u32()) * scale;
+}
+
+template<>
+VESSL_INLINE q31_t unit<q31_t>()
+{
+  return q31_t(static_cast<int32_t>(u32() >> 1));
+}
+
+template<>
+VESSL_INLINE phase_t unit<phase_t>()
+{
+  return static_cast<phase_t>(u32());
+}
+
+template <typename T> 
+VESSL_INLINE T range(T low, T high)
+{
+  analog_t r = unit<analog_t>();
   return low + r*(high-low);
 }
 } // namespace random

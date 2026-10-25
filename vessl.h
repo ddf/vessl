@@ -536,6 +536,10 @@ static uint32_t ru32_seed = 33641;
 VESSL_INLINE void su32(uint32_t seed) {ru32_seed = seed; }
 uint32_t u32();
 
+// returns a value between 0 and 1 (exclusive)
+template<typename T>
+T unit();
+
 // returns a random value between low (inclusive) and high (exclusive)
 template<typename T>
 T range(T low, T high);

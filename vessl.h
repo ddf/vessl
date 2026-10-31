@@ -1041,6 +1041,9 @@ struct args
       
   // helper for biquad
   VESSL_INLINE analog_t omega() const { return hz * math::pi<analog_t>() / sr; }
+
+  // normalized frequency
+  VESSL_INLINE analog_t fc() const { return (hz+hz)/sr; }
 };
     
 // DC blocking filter, see: https://www.dsprelated.com/freebooks/filters/DC_Blocker.html
@@ -1053,10 +1056,8 @@ struct dc_block
 
 // Moog 24 dB/oct resonant VCF
 // References: CSound source code, Stilson/Smith CCRMA paper.
-// flt1 is based on a modified version by paul.kellett@maxim.abel.co.uk July 2000
-// see: https://www.musicdsp.org/en/latest/Filters/25-moog-vcf-variation-1.html
-// flt2 is based on a modified version by Timo Tossavainen
-// https://www.musicdsp.org/en/latest/Filters/26-moog-vcf-variation-2.html
+// for both filters, q is in the range [0,1]
+// and gain is used to boost or attenuate the input signal
 struct moog
 {
   enum class type
@@ -1064,6 +1065,8 @@ struct moog
     lp, bp, hp
   };
 
+  // based on a version by paul.kellett@maxim.abel.co.uk July 2000
+  // see: https://www.musicdsp.org/en/latest/Filters/25-moog-vcf-variation-1.html
   template<typename T, type F>
   struct flt1
   {
@@ -1080,6 +1083,8 @@ struct moog
   template<typename T>
   struct high_pass final : flt1<T, type::hp> {}; 
 
+  // based on a version by Timo Tossavainen
+  // https://www.musicdsp.org/en/latest/Filters/26-moog-vcf-variation-2.html
   template<typename T>
   struct flt2
   {
@@ -1123,7 +1128,6 @@ struct biquad
   };
       
   template<typename T, class CoGen>
-  // ReSharper disable once CppInconsistentNaming
   struct df2t final : cascade<T, 2>
   {
     static CoGen cg;
@@ -1132,8 +1136,7 @@ struct biquad
     using cascade<T,2>::state_count;
          
     void process(const T* source, T* dest, size_t block_size, const args& args);
-    // ReSharper disable once CppMemberFunctionMayBeStatic
-    [[nodiscard]] size_t stage_count() const { return Stages; }
+    [[nodiscard]] VESSL_INLINE size_t stage_count() const { return Stages; }
   };
 
   template<typename T>

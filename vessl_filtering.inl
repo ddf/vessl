@@ -1,5 +1,7 @@
 #pragma once
 
+#include "vessl.h"
+
 template <typename T>
 VESSL_INLINE void vessl::filtering::dc_block<T>::process(const T *source, T *dest, size_t block_size, const args &args)
 {
@@ -11,6 +13,86 @@ VESSL_INLINE void vessl::filtering::dc_block<T>::process(const T *source, T *des
     y1 = x - x1 + r*y1;
     x1 = x;
     *dest++ = y1;
+  }
+}
+
+template <typename T, vessl::filtering::moog::type F>
+VESSL_INLINE void vessl::filtering::moog::flt1<T, F>::process(const T* source, T* dest, size_t block_size, const vessl::filtering::args& args)
+{
+  analog_t fn = args.hz / (args.sr*0.5f);
+  analog_t rz = vessl::math::constrain(args.q, 0.f, 1.f);
+
+  analog_t q = 1.f - fn;
+  analog_t p = fn + 0.8f * fn * q;
+  analog_t f = p + p - 1.f;
+  q = rz * (1.f + 0.5f * q * (1.f - q + 5.6f * q * q));
+
+  analog_t t1, t2;
+  while(block_size--)
+  {
+    analog_t in = vessl::cast<analog_t>(*source++);
+    in -= q * b4; // feedback
+    
+    t1 = b1;
+    b1 = (in + b0)*p - b1*f;
+
+    t2 = b2;
+    b2 = (b1 + t1)*p - b2*f;
+
+    t1 = b3;
+    b3 = (b2 + t2)*p - b3*f;
+
+    b4 = (b3 + t1)*p - b4*f;
+    b4 = b4 - b4*b4*b4*b4*0.166667f; // clipping
+    
+    // inelegantly squash denormals
+    if (vessl::math::is_nan(b4))
+    {
+      b1 = b2 = b3 = b4 = 0;
+    }
+
+    b0 = in;
+
+    if constexpr(F == vessl::filtering::moog::type::lp)
+    {
+      *dest++ = vessl::cast<T>(b4);
+    }
+
+    if constexpr(F == vessl::filtering::moog::type::bp)
+    {
+      *dest++ = vessl::cast<T>(3.f * (b3-b4)); 
+    }
+
+    if constexpr(F == vessl::filtering::moog::type::hp)
+    {
+      *dest++ = vessl::cast<T>(in - b4);
+    }
+  }
+}
+
+template <typename T>
+VESSL_INLINE void vessl::filtering::moog::flt2<T>::process(const T* source, T* dest, size_t block_size, const vessl::filtering::args& args)
+{
+  analog_t fc = args.hz / (args.sr*0.5f);
+  analog_t rz = vessl::math::constrain(args.q, 0.f, 4.f);
+
+  analog_t f = fc * 1.16f;
+  analog_t fb = rz * (1.f - 0.15f * f * f);
+  while(block_size--)
+  {
+    analog_t input = vessl::cast<analog_t>(*source++);
+    input -= out4 * fb;
+    input *= 0.35013 * (f*f)*(f*f);
+    // the 0.3 scaling of the input is what keeps resonance under control when in the [0,4] range.
+    out1 = input + 0.3 * in1 + (1 - f) * out1; // Pole 1
+    in1  = input;
+    out2 = out1 + 0.3 * in2 + (1 - f) * out2;  // Pole 2
+    in2  = out1;
+    out3 = out2 + 0.3 * in3 + (1 - f) * out3;  // Pole 3
+    in3  = out2;
+    out4 = out3 + 0.3 * in4 + (1 - f) * out4;  // Pole 4
+    in4  = out3;
+    *dest++ = vessl::cast<T>(out4);
   }
 }
 

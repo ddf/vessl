@@ -1050,7 +1050,48 @@ struct dc_block
   T x1 = T(0), y1 = T(0);
   void process(const T* source, T* dest, size_t block_size, const args& args);
 };
-    
+
+// Moog 24 dB/oct resonant VCF
+// References: CSound source code, Stilson/Smith CCRMA paper.
+// flt1 is based on a modified version by paul.kellett@maxim.abel.co.uk July 2000
+// see: https://www.musicdsp.org/en/latest/Filters/25-moog-vcf-variation-1.html
+// flt2 is based on a modified version by Timo Tossavainen
+// https://www.musicdsp.org/en/latest/Filters/26-moog-vcf-variation-2.html
+struct moog
+{
+  enum class type
+  {
+    lp, bp, hp
+  };
+
+  template<typename T, type F>
+  struct flt1
+  {
+    analog_t b0 = 0.f, b1 = 0.f, b2 = 0.f, b3 = 0.f, b4 = 0.f;
+    void process(const T* source, T* dest, size_t block_size, const args& args);
+  };
+
+  template<typename T>
+  struct low_pass final : flt1<T, type::lp> {};
+
+  template<typename T>
+  struct band_pass final : flt1<T, type::bp> {};
+
+  template<typename T>
+  struct high_pass final : flt1<T, type::hp> {}; 
+
+  template<typename T>
+  struct flt2
+  {
+    analog_t in1 = 0.f, in2 = 0.f, in3 = 0.f, in4 = 0.f;
+    analog_t out1 = 0.f, out2 = 0.f, out3 = 0.f, out4 = 0.f;
+    void process(const T* source, T* dest, size_t block_size, const args& args);
+  };
+
+  template<typename T>
+  struct low_pass_2 final : flt2<T> {};
+};
+
 template<typename T>
 struct data
 {

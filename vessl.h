@@ -915,6 +915,11 @@ void spatialize(const T& sample, analog_t pan, frame<T,N>* out_frame);
 // it will rebalance the target frame.
 template<typename T, size_t N, typename E = math::easing::linear>
 void make_spatializer(analog_t balance, frame<T,N>* out_spatializer);
+
+// clamp floating point [-1,1] without branching
+// from https://www.musicdsp.org/en/latest/Filters/145-stilson-s-moog-filter-code.html
+template<typename T>
+T saturate(T x);
   
 // lovingly borrowed from pichenettes/stmlib
 template<typename T>
@@ -1056,46 +1061,83 @@ struct dc_block
 
 // Moog 24 dB/oct resonant VCF
 // References: CSound source code, Stilson/Smith CCRMA paper.
-// for both filters, q is in the range [0,1]
+// for all filters, q is in the range [0,1]
 // and gain is used to boost or attenuate the input signal
-struct moog
+// all filters can be pinged with good results, but vary in how well they track cutoff frequency.
+namespace moog
 {
   enum class type
   {
     lp, bp, hp
   };
 
-  // based on a version by paul.kellett@maxim.abel.co.uk July 2000
-  // see: https://www.musicdsp.org/en/latest/Filters/25-moog-vcf-variation-1.html
+  /** based on a version by David Lowenfels (itself based on Tim Stilson's code).
+    * this filter can distort under loud input with high q.
+    * @see https://www.musicdsp.org/en/latest/Filters/145-stilson-s-moog-filter-code.html
+    * @see https://ccrma.stanford.edu/~dfl/pd/index.htm
+    */ 
   template<typename T, type F>
-  struct flt1
+  struct flt
   {
-    analog_t b0 = 0.f, b1 = 0.f, b2 = 0.f, b3 = 0.f, b4 = 0.f;
+    analog_t b0 = 0.f, b1 = 0.f, b2 = 0.f, b3 = 0.f, output = 0.f;
     void process(const T* source, T* dest, size_t block_size, const args& args);
   };
 
   template<typename T>
-  struct low_pass final : flt1<T, type::lp> {};
+  struct low_pass final : flt<T, type::lp> {};
 
   template<typename T>
-  struct band_pass final : flt1<T, type::bp> {};
+  struct band_pass final : flt<T, type::bp> {};
 
   template<typename T>
-  struct high_pass final : flt1<T, type::hp> {}; 
+  struct high_pass final : flt<T, type::hp> {}; 
 
-  // based on a version by Timo Tossavainen
-  // https://www.musicdsp.org/en/latest/Filters/26-moog-vcf-variation-2.html
-  template<typename T>
-  struct flt2
+  /** based on a version by Paul Kellett
+    * @see https://www.musicdsp.org/en/latest/Filters/25-moog-vcf-variation-1.html
+    */
+  namespace v1
   {
-    analog_t in1 = 0.f, in2 = 0.f, in3 = 0.f, in4 = 0.f;
-    analog_t out1 = 0.f, out2 = 0.f, out3 = 0.f, out4 = 0.f;
-    void process(const T* source, T* dest, size_t block_size, const args& args);
-  };
+    template<typename T, type F>
+    struct flt
+    {
+      analog_t b0 = 0.f, b1 = 0.f, b2 = 0.f, b3 = 0.f, b4 = 0.f;
+      void process(const T* source, T* dest, size_t block_size, const args& args);
+    };
 
-  template<typename T>
-  struct low_pass_2 final : flt2<T> {};
-};
+    template<typename T>
+    struct low_pass final : flt<T, type::lp> {};
+
+    template<typename T>
+    struct band_pass final : flt<T, type::bp> {};
+
+    template<typename T>
+    struct high_pass final : flt<T, type::hp> {}; 
+  }
+
+  /** based on a version by Timo Tossavainen
+    * seems to have the best frequency tracking of the three low pass filters
+    * @see https://www.musicdsp.org/en/latest/Filters/26-moog-vcf-variation-2.html
+    */
+  namespace v2
+  {
+    template<typename T, type F>
+    struct flt
+    {
+      analog_t in1 = 0.f, in2 = 0.f, in3 = 0.f, in4 = 0.f;
+      analog_t out1 = 0.f, out2 = 0.f, out3 = 0.f, out4 = 0.f;
+      void process(const T* source, T* dest, size_t block_size, const args& args);
+    };
+
+    template<typename T>
+    struct low_pass final : flt<T, type::lp> {};
+
+    template<typename T>
+    struct band_pass final : flt<T, type::bp> {};
+
+    template<typename T>
+    struct high_pass final : flt<T, type::hp> {}; 
+  }
+}
 
 template<typename T>
 struct data

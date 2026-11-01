@@ -674,6 +674,15 @@ VESSL_INLINE void vessl::sample::spatialize(const T& sample, analog_t pan, frame
   *out_frame *= sample;
 }
 
+template <typename T> 
+VESSL_INLINE T vessl::sample::saturate(T x) 
+{ 
+  static constexpr T limit = 0.95;
+  T x1 = vessl::math::abs<T>( x + limit );
+  T x2 = vessl::math::abs<T>( x - limit );
+  return 0.5 * (x1 - x2); 
+}
+
 template <typename T>
 VESSL_INLINE T vessl::sample::softlimit(T x)
 {

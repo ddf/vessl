@@ -487,6 +487,18 @@ protected:
   
 namespace processors
 {
+// a processor that does not change in the input signal
+template<typename T>
+class passthru : public unit_processor<T>, protected plist<0>
+{
+public:
+  passthru() : unit_processor<T>() {}
+  const parameter_list& parameters() const override { return *this; }
+
+  VESSL_INLINE T process(const T& v) override { return v; }
+  using processor<T>::process;
+};
+
 template<typename T>
 class slew : public unit_processor<T>, protected plist<5>
 {
@@ -532,40 +544,50 @@ private:
 };
   
 template<typename T>
-class delay : public unit_processor<T>, protected plist<2>
+class delay : public unit_processor<T>
+            , protected plist<2>
 {
+  static passthru<T> passthru_;
 public:
-  delay(array<T> delay_buffer, analog_t sample_rate, analog_t delay_in_seconds = 0, analog_t feedback_amount = 0)
-  : unit_processor<T>(), buffer_(delay_buffer.data(), delay_buffer.size()), dt_(1.0f/sample_rate)
+  delay(array<T> delay_buffer, analog_t sample_rate, analog_t delay_in_seconds = 0, analog_t feedback_amount = 0, unit_processor<T>* feedback_proc = nullptr)
+  : unit_processor<T>()
+  , buffer_(delay_buffer.data(), delay_buffer.size())
+  , dt_(1.0f/sample_rate)
+  , feedback_proc_(feedback_proc ? feedback_proc : &passthru_)
   {
     params_.time.value = duration_t::from_seconds(delay_in_seconds, sample_rate);
     delay_in_samples_ = params_.time.value.samples;
     params_.feedback.value = feedback_amount;
   }
     
-  void set_sample_rate(float sampleRate) override { dt_ = 1.0f / sampleRate; }
-  const parameter_list& parameters() const override { return *this; }
+  VESSL_INLINE void set_sample_rate(float sampleRate) override { dt_ = 1.0f / sampleRate; }
+  [[nodiscard]] VESSL_INLINE const parameter_list& parameters() const override { return *this; }
 
-  sample::delay_line<T>& buffer() { return buffer_; }
-  const sample::delay_line<T>& buffer() const { return buffer_; }
+  [[nodiscard]] VESSL_INLINE sample::delay_line<T>& buffer() { return buffer_; }
+  [[nodiscard]] VESSL_INLINE const sample::delay_line<T>& buffer() const { return buffer_; }
 
   /// delay time expressed as vessl::duration (i.e. samples), can be set using an analog_t
-  parameter time() const { return params_.time("time", 't'); }
+  [[nodiscard]] VESSL_INLINE parameter time() const { return params_.time("time", 't'); }
   /// amount of signal to feedback, can be negative to invert feedback signal, clamped [-1,1]
-  parameter feedback() const { return params_.feedback("feedback", 'f'); }
+  [[nodiscard]] VESSL_INLINE parameter feedback() const { return params_.feedback("feedback", 'f'); }
     
   T process(const T& in) override;
 
-  void process(source<T>& source, sink<T>& sink) override { processor<T>::process(source, sink); }
+  VESSL_INLINE void process(source<T>& source, sink<T>& sink) override { processor<T>::process(source, sink); }
     
   template<time::mode TimeMode = time::mode::slew>
   void process(array<T> input, array<T> output);
     
 protected:
-  parameter element_at(size_t index) const override
+  [[nodiscard]] VESSL_INLINE parameter element_at(size_t index) const override
   {
-    parameter p[num] = { time(), feedback() }; 
-    return p[index];
+    switch(index)
+    {
+      case 0: return time();
+      case 1: return feedback();
+    }
+
+    return parameter::none();
   }
     
   sample::delay_line<T> buffer_;
@@ -578,6 +600,8 @@ private:
     duration_p time;
     analog_p feedback;
   } params_;
+
+  unit_processor<T>* feedback_proc_;
 };
 
 template<typename T>
@@ -684,6 +708,55 @@ private:
   {
     gain_p pre_gain;
   } params_;
+};
+
+// useful as a delay feedback processor
+// dc block -> low pass -> softlimit
+template<typename T>
+class conditioner : public unit_processor<T>, protected plist<1>
+{
+public:
+  conditioner(analog_t sample_rate, analog_t cuthz) 
+  : unit_processor<T>()
+  , sample_rate_(sample_rate)
+  , filter_args_(sample_rate, cuthz, filtering::q::butterworth<T>(), gain_t(0.f)) 
+  {
+    params_.cutoff.value = cuthz;
+  }
+
+  [[nodiscard]] const parameter_list& parameters() const override { return *this; }
+
+  [[nodiscard]] parameter cutoff() const { return params_.cutoff("cutoff", 'z'); }
+
+  VESSL_INLINE T process(const T& in) override
+  {
+    T out;
+    filter_args_.hz = params_.cutoff.value;
+    dc_block_.process(&in, &out, 1, filter_args_);
+    filter_.process(&out, &out, 1, filter_args_);
+    return vessl::sample::softlimit(out);
+  }
+
+protected:
+  [[nodiscard]] parameter element_at(size_t index) const override
+  {
+    switch (index)
+    {
+    case 0: return cutoff();
+    }
+    return parameter::none();
+  }
+
+private:
+  struct
+  {
+    analog_p cutoff;
+  } params_;
+
+  analog_t sample_rate_;
+  filtering::args filter_args_;
+  filtering::dc_block<T> dc_block_;
+  filtering::biquad<2>::low_pass<T> filter_;
 };
   
 // when used as a processor, will write incoming audio to the delayline
@@ -800,6 +873,7 @@ public:
   const parameter_list& parameters() const override { return *this; }
 
   parameter fhz() const { return params_.fhz("fHz", 'f'); }
+  // aka resonance, generally [0,1], but will depend on the filter type
   parameter q() const { return params_.q("q", 'q'); }
   // unused by some filter types (see filtering section)
   parameter emphasis() const { return params_.emphasis("emphasis", 'e'); }

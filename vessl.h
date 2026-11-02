@@ -1359,7 +1359,7 @@ public:
   clockable& operator=(const clockable&) = default;
   clockable& operator=(clockable&&) = default;
       
-  // users should call tap at the beginning of every clock pulse
+  // users should call clock at the beginning of every clock pulse
   void clock();
   void clock(period_t sample_delay);
   

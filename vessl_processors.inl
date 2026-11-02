@@ -6,6 +6,8 @@ namespace vessl
 {
 namespace processors
 {
+// =========================================================
+// slew
 template<typename T>
 VESSL_INLINE T slew<T>::process(const T& v)
 {
@@ -28,6 +30,12 @@ VESSL_INLINE T slew<T>::process(const T& v)
   return params_.output.value;
 }
 
+// =========================================================
+// delay
+
+template<typename T>
+passthru<T> delay<T>::passthru_;
+
 template<typename T>
 VESSL_INLINE T delay<T>::process(const T& in)
 {
@@ -35,8 +43,9 @@ VESSL_INLINE T delay<T>::process(const T& in)
   // delay time in samples
   analog_t dts = math::constrain<analog_t>(delay_in_samples_, 0.f, cast<analog_t>(buffer_.size()-1));
   analog_t s = buffer_.readf(dts);
-  analog_t fbk = math::constrain<analog_t>(cast<analog_t>(feedback()), -1.0, 1.0);
-  buffer_.write(in + s * fbk);
+  analog_t fbk = math::constrain<analog_t>(params_.feedback.value, -1.0, 1.0);
+  analog_t f = feedback_proc_->process(s*fbk);
+  buffer_.write(in + f);
   return s;
 }
 
@@ -44,12 +53,12 @@ template<typename T>
 template<time::mode TimeMode>
 VESSL_INLINE void delay<T>::process(array<T> input, array<T> output)
 {
-  if (TimeMode == time::mode::snap)
+  if constexpr(TimeMode == time::mode::snap)
   {
     processor<T>::process(input, output);
   }
 
-  if (TimeMode == time::mode::slew)
+  if constexpr(TimeMode == time::mode::slew)
   {
     auto r = input.make_reader();
     auto w = output.make_writer();
@@ -61,13 +70,14 @@ VESSL_INLINE void delay<T>::process(array<T> input, array<T> output)
       // delay time in samples
       analog_t dts = math::constrain<analog_t>(delay_in_samples_, 0.f, cast<analog_t>(buffer_.size()-1));
       analog_t wet = buffer_.readf(dts);
-      analog_t fbk = math::constrain<analog_t>(cast<analog_t>(feedback()), -1.0, 1.0);
-      buffer_.write(in + wet*fbk);
+      analog_t fbk = math::constrain<analog_t>(params_.feedback.value, -1.0, 1.0);
+      analog_t fed = feedback_proc_->process(wet*fbk);
+      buffer_.write(in + fed);
       w << wet;
     }
   }
   
-  if (TimeMode == time::mode::fade)
+  if constexpr(TimeMode == time::mode::fade)
   {
     auto r = input.make_reader();
     auto w = output.make_writer();
@@ -80,13 +90,14 @@ VESSL_INLINE void delay<T>::process(array<T> input, array<T> output)
     analog_t sza = cast<analog_t>(buffer_.size()-1);
     analog_t fts = math::constrain<analog_t>(delay_in_samples_, 0.0, sza);
     analog_t tts = math::constrain<analog_t>(targetSampleDelay, 0.0, sza);
-    analog_t fbk = math::constrain<analog_t>(cast<analog_t>(feedback()), -1.0, 1.0);
+    analog_t fbk = math::constrain<analog_t>(params_.feedback.value, -1.0, 1.0);
     
     while (r && w)
     {
       T in = r.read();
       T wet = (1.0f - fade) * buffer_.readf(fts) + fade * buffer_.readf(tts);
-      buffer_.write(in + wet*fbk);
+      T fed = feedback_proc_->process(wet*fbk);
+      buffer_.write(in + fed);
       w << wet;
       fade += fadeInc;
     }
@@ -95,6 +106,8 @@ VESSL_INLINE void delay<T>::process(array<T> input, array<T> output)
   }
 }
 
+// =================================================================
+// follow
 template <typename T>
 void follow<T>::set_sample_rate(float sample_rate)
 {
@@ -122,6 +135,8 @@ VESSL_INLINE T follow<T>::process(const T& in)
   return previous_ + (current_ - previous_) * t;
 }
 
+// ==========================================================================
+// peak meter
 template <typename T>
 typename processor<T>::output_t peak_meter<T>::process(const typename processor<T>::input_t &in)
 {  
@@ -131,6 +146,8 @@ typename processor<T>::output_t peak_meter<T>::process(const typename processor<
   return params_.peak.value;
 }
 
+// ============================================================================
+// limiter
 template<typename T>
 VESSL_INLINE T limiter<T>::process(const T& in)
 {
@@ -143,6 +160,8 @@ VESSL_INLINE T limiter<T>::process(const T& in)
   //return pre*gain*0.8;
 }
 
+// ============================================================================
+// freeze
 template<typename T>
 VESSL_INLINE T freeze<T>::generate() 
 {
@@ -269,6 +288,8 @@ VESSL_INLINE void freeze<T>::proc_gen(array<T> input, array<T> output)
   }
 }
 
+// ===============================================================================
+// filter
 template <typename T, template <typename> class H>
 VESSL_INLINE T filter<T, H>::process(const T &in)
 {
@@ -295,6 +316,8 @@ VESSL_INLINE void filter<T, H>::process(array<T> in, array<T> out)
   func_.process(in.data(), out.data(), in.size(), fargs);
 }
 
+// =========================================================================
+// bitcrush
 template<typename T, uint32_t MaxBits>
 VESSL_INLINE T bitcrush<T, MaxBits>::process(const T& in)
 {

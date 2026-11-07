@@ -817,7 +817,7 @@ VESSL_INLINE T ring_buffer<T>::overdub(const T &v, size_t write_offset)
 }
 
 template <typename T>
-void ring_buffer<T>::overwrite(const T &v, size_t write_offset)
+VESSL_INLINE void ring_buffer<T>::overwrite(const T &v, size_t write_offset)
 {
   size_t idx = get_write_index() + write_offset;
   if (idx >= size_) idx %= size_;
